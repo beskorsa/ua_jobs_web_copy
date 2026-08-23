@@ -1,0 +1,28 @@
+{
+  "name": "ua-jobs-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:setup": "tsx scripts/ensure-schema.ts"
+  },
+  "dependencies": {
+    "next": "^14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "pg": "^8.12.0",
+    "openai": "^4.55.4",
+    "pdf-parse": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.15",
+    "@types/react": "^18.3.4",
+    "@types/pg": "^8.11.6",
+    "typescript": "^5.5.4",
+    "tsx": "^4.16.5",
+    "dotenv": "^16.4.5"
+  }
+}

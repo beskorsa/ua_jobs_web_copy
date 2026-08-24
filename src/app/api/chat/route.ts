@@ -5,7 +5,7 @@ import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { ensureSchema } from "@/lib/schema";
 import { getOrCreateUserId } from "@/lib/user";
 import { getOpenAI, CHAT_MODEL, embedText } from "@/lib/openai";
-import { semanticSearch, getVacancy, upsertExternalVacancy } from "@/lib/vacancies";
+import { semanticSearch, getVacancy, upsertExternalVacancy, upsertVacancyFromText } from "@/lib/vacancies";
 import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy } from "@/lib/generate";
 import { query } from "@/lib/db";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
@@ -80,6 +80,24 @@ const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "analyze_vacancy_text",
+      description:
+        "Користувач вставив у чат сам текст вакансії (скопійований з сайту вручну, наприклад коли " +
+        "посилання не вдалось завантажити) — не URL, а безпосередньо опис вакансії. Зберігає вакансію " +
+        "карткою і, якщо є завантажене резюме, одразу оцінює релевантність, як і analyze_vacancy_link.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Назва посади, якщо видно з тексту" },
+          text: { type: "string", description: "Повний вставлений текст вакансії" },
+        },
+        required: ["text"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "ask_about_vacancy",
       description:
         "Відповісти на довільне питання користувача про конкретну вакансію, яку вже показано у списку " +
@@ -134,8 +152,10 @@ export async function POST(req: NextRequest) {
           content:
             "Ти — асистент пошуку роботи на українському сайті. Визнач намір користувача і виклич " +
             "відповідний інструмент, якщо це доречно (пошук вакансій; cover letter для вакансії зі " +
-            "списку; поради по резюме; якщо в повідомленні є URL — analyze_vacancy_link; питання про " +
-            "вже показану вакансію, яке не є проханням про cover letter — ask_about_vacancy). Якщо " +
+            "списку; поради по резюме; якщо в повідомленні є URL — analyze_vacancy_link; якщо " +
+            "повідомлення — це вставлений цілий текст вакансії без URL (довгий опис посади, вимог " +
+            "тощо, а не пошуковий запит) — analyze_vacancy_text; питання про вже показану вакансію, " +
+            "яке не є проханням про cover letter — ask_about_vacancy). Якщо " +
             "жоден інструмент не підходить (загальне питання, привітання, подяка) — просто відповідай " +
             "сам, коротко, українською, без інструменту.",
         },
@@ -227,6 +247,39 @@ export async function POST(req: NextRequest) {
             }
           } catch (e: any) {
             reply = `Не вдалось обробити посилання: ${e.message ?? String(e)}`;
+          }
+        }
+      } else if (toolCall.function.name === "analyze_vacancy_text") {
+        const text = String(args.text || "").trim();
+        const title = String(args.title || "").trim() || "Вакансія (вставлений текст)";
+        const linkLimit = await checkRateLimit(userId, "vacancy_link", 10, 3600); // той самий бакет, що й лінки
+        if (!linkLimit.allowed) {
+          reply = rateLimitResponseBody(linkLimit.retryAfterSeconds).error;
+        } else if (text.length < 50) {
+          reply = "Текст вакансії закороткий — вставте повний опис.";
+        } else {
+          try {
+            const vacancy = await upsertVacancyFromText(title, text);
+            payload = { action: "search", results: [vacancy] };
+            if (resumeId) {
+              const resumeRows = await query<{ raw_text: string }>(`select raw_text from resumes where id = $1`, [
+                resumeId,
+              ]);
+              if (resumeRows.length) {
+                const result = await scoreVacancy(resumeRows[0].raw_text, vacancy);
+                await saveGeneration(resumeId, vacancy.id, result);
+                payload = { action: "cover_letter", results: [vacancy], coverLetter: result, vacancy };
+                reply = `Розібрав вакансію «${vacancy.title}» — релевантність ${result.relevance}/10:`;
+              } else {
+                reply = `Зберіг вакансію «${vacancy.title}». Завантажте резюме, щоб оцінити відповідність.`;
+              }
+            } else {
+              reply =
+                `Зберіг вакансію «${vacancy.title}». Завантажте резюме, щоб оцінити відповідність, ` +
+                `або запитайте про неї що завгодно.`;
+            }
+          } catch (e: any) {
+            reply = `Не вдалось зберегти вакансію: ${e.message ?? String(e)}`;
           }
         }
       } else if (toolCall.function.name === "ask_about_vacancy") {

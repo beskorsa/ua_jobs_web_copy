@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { query } from "./db";
 import { vecToPg } from "./vector";
 import { fetchVacancyPage } from "./fetchExternalVacancy";
@@ -86,6 +87,22 @@ export async function upsertExternalVacancy(rawUrl: string): Promise<Vacancy> {
      returning id, source, title, company, description, url, published_at, city,
                salary_min, salary_max, salary_currency`,
     [page.title.slice(0, 300), page.text, page.finalUrl],
+  );
+  return rows[0];
+}
+
+// Фолбек, коли пряме завантаження за посиланням не вдалось (403 від
+// бот-захисту сайту тощо, див. fetchExternalVacancy.ts) — користувач сам
+// копіює текст вакансії і вставляє в чат. url тут синтетичний (сайт її
+// не видав), унікальність не потрібна — кожна вставка створює новий запис.
+export async function upsertVacancyFromText(title: string, text: string): Promise<Vacancy> {
+  const syntheticUrl = `pasted://${randomUUID()}`;
+  const rows = await query<Vacancy>(
+    `insert into vacancies (source, external_id, keyword, title, company, description, url)
+     values ('pasted_text', null, 'pasted_text', $1, null, $2, $3)
+     returning id, source, title, company, description, url, published_at, city,
+               salary_min, salary_max, salary_currency`,
+    [title.slice(0, 300), text.slice(0, 12000), syntheticUrl],
   );
   return rows[0];
 }

@@ -139,14 +139,14 @@ export default function Home() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
-      if (data.action === "search" && data.results) setVacancies(data.results);
+      if (data.results) setVacancies(data.results);
 
       setMessages((m) => [
         ...m,
         {
           role: "assistant",
           content: data.reply,
-          vacancies: data.action === "search" ? data.results : undefined,
+          vacancies: data.results ?? undefined,
           coverLetter:
             data.action === "cover_letter"
               ? { ...data.coverLetter, vacancyTitle: data.vacancy?.title }
@@ -163,6 +163,32 @@ export default function Home() {
 
   return (
     <main className="page">
+      <div className="contact-bar">
+        <a href="mailto:lizabeskorsa@gmail.com" className="contact-bar__link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M3 6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-11Z"
+              stroke="currentColor"
+              strokeWidth="1.6"
+            />
+            <path d="m4 6.5 8 6.5 8-6.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          lizabeskorsa@gmail.com
+        </a>
+        <a href="https://t.me/liza4net" target="_blank" rel="noreferrer" className="contact-bar__link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M22 2 11 13M22 2 15 22 11 13 2 9Z"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          t.me/liza4net
+        </a>
+      </div>
+
       <header className="page__header">
         <span className="page__kicker">AI-пошук роботи</span>
         <h1>Пошук вакансій з AI</h1>

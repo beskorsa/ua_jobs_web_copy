@@ -81,6 +81,40 @@ export async function saveGeneration(resumeId: number, vacancyId: number, result
   );
 }
 
+// Свободный вопрос про конкретную вакансию (в т.ч. присланную ссылкой) —
+// grounding на её описание (+резюме, если оно загружено), без семантического
+// поиска: тут уже известно, про какую именно вакансию спрашивают.
+export async function answerAboutVacancy(
+  vacancy: Pick<Vacancy, "title" | "company" | "description" | "url">,
+  question: string,
+  resumeText: string | null,
+): Promise<string> {
+  const openai = getOpenAI();
+  const resp = await openai.chat.completions.create({
+    model: CHAT_MODEL,
+    temperature: 0.3,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Ти — асистент з пошуку роботи. Відповідай на питання користувача про конкретну вакансію, " +
+          "спираючись ЛИШЕ на текст вакансії (і резюме кандидата нижче, якщо воно надане) — нічого не " +
+          "вигадуй, чого там немає. Якщо в описі вакансії немає відповіді на питання — чесно скажи це. " +
+          "Відповідай коротко (2-5 речень), українською.",
+      },
+      {
+        role: "user",
+        content:
+          `### Вакансія\nПосада: ${vacancy.title}\nКомпанія: ${vacancy.company ?? "—"}\n` +
+          `Опис:\n${(vacancy.description ?? "").trim()}\n\n` +
+          (resumeText ? `### Резюме кандидата\n${resumeText.trim()}\n\n` : "") +
+          `### Питання\n${question}`,
+      },
+    ],
+  });
+  return resp.choices[0].message.content?.trim() || "Не вдалось сформувати відповідь.";
+}
+
 export async function getResumeImprovementTips(resumeText: string): Promise<string[]> {
   const openai = getOpenAI();
   const resp = await openai.chat.completions.create({

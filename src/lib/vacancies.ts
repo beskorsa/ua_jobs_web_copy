@@ -1,5 +1,6 @@
 import { query } from "./db";
 import { vecToPg } from "./vector";
+import { fetchVacancyPage } from "./fetchExternalVacancy";
 
 export type VacancyResult = {
   id: number;
@@ -63,4 +64,28 @@ export async function getVacancy(id: number): Promise<Vacancy | null> {
     [id],
   );
   return rows[0] ?? null;
+}
+
+// Пользователь прислал в чат прямую ссылку на вакансию (необязательно с
+// сайтов, которые скрапит ua_jobs_parser) — качаем страницу, вытаскиваем
+// текст и кладём как обычную запись в vacancies (source='external_link'),
+// чтобы дальше бесплатно переиспользовать весь существующий пайплайн
+// (scoreVacancy/cover letter/ask_about_vacancy по id, карточка на фронте).
+// ON CONFLICT(url) — повторная присылка той же ссылки просто обновляет текст,
+// а не плодит дубли.
+export async function upsertExternalVacancy(rawUrl: string): Promise<Vacancy> {
+  const page = await fetchVacancyPage(rawUrl);
+  const rows = await query<Vacancy>(
+    `insert into vacancies (source, external_id, keyword, title, company, description, url)
+     values ('external_link', null, 'external_link', $1, null, $2, $3)
+     on conflict (url) do update set
+       title = excluded.title,
+       description = excluded.description,
+       last_seen_at = now(),
+       is_active = true
+     returning id, source, title, company, description, url, published_at, city,
+               salary_min, salary_max, salary_currency`,
+    [page.title.slice(0, 300), page.text, page.finalUrl],
+  );
+  return rows[0];
 }

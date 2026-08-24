@@ -5,7 +5,7 @@ import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { ensureSchema } from "@/lib/schema";
 import { getOrCreateUserId } from "@/lib/user";
 import { getOpenAI, CHAT_MODEL, embedText } from "@/lib/openai";
-import { semanticSearch, getVacancy, upsertExternalVacancy, upsertVacancyFromText } from "@/lib/vacancies";
+import { semanticSearch, getVacancy, getVacancyByUrl, upsertExternalVacancy, upsertVacancyFromText } from "@/lib/vacancies";
 import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy } from "@/lib/generate";
 import { query } from "@/lib/db";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
@@ -226,7 +226,13 @@ export async function POST(req: NextRequest) {
           reply = "Не бачу посилання — надішліть URL вакансії.";
         } else {
           try {
-            const vacancy = await upsertExternalVacancy(url);
+            // Спершу перевіряємо базу — якщо цю вакансію вже затягнув
+            // нічний watchdog.py (work.ua/robota.ua/dou.ua/djinni.co тощо),
+            // вона там вже лежить з повним описом і http-запит з сервера
+            // взагалі не потрібен (а саме він ловить 403 від бот-захисту).
+            const known = await getVacancyByUrl(url);
+            const vacancy = known ?? (await upsertExternalVacancy(url));
+            const fromDb = Boolean(known);
             payload = { action: "search", results: [vacancy] };
             if (resumeId) {
               const resumeRows = await query<{ raw_text: string }>(`select raw_text from resumes where id = $1`, [
@@ -242,11 +248,13 @@ export async function POST(req: NextRequest) {
               }
             } else {
               reply =
-                `Розібрав вакансію «${vacancy.title}». Завантажте резюме, щоб оцінити відповідність, ` +
-                `або запитайте про неї що завгодно.`;
+                `${fromDb ? "Знайшов цю вакансію в базі" : "Розібрав вакансію"} «${vacancy.title}». ` +
+                "Завантажте резюме, щоб оцінити відповідність, або запитайте про неї що завгодно.";
             }
           } catch (e: any) {
-            reply = `Не вдалось обробити посилання: ${e.message ?? String(e)}`;
+            reply =
+              `Не вдалось обробити посилання: ${e.message ?? String(e)}. ` +
+              "Можете скопіювати текст вакансії і вставити його прямо сюди в чат.";
           }
         }
       } else if (toolCall.function.name === "analyze_vacancy_text") {

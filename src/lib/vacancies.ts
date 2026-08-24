@@ -67,6 +67,26 @@ export async function getVacancy(id: number): Promise<Vacancy | null> {
   return rows[0] ?? null;
 }
 
+// Якщо посилання веде на вакансію, яку вже затягнув парсер (work.ua/
+// robota.ua/dou.ua/djinni.co тощо — nightly watchdog.py) — вона вже лежить
+// в базі з повним описом, і НЕ треба ходити за нею http-запитом з сервера
+// (де це часто ловить 403 від бот-захисту, бо запит йде з датацентрового
+// IP Vercel без рендеру сторінки — на відміну від парсера, який ходить
+// через Playwright з локальної машини). rtrim по "/" — щоб не залежати
+// від хвостового слеша в присланому лінку.
+export async function getVacancyByUrl(rawUrl: string): Promise<Vacancy | null> {
+  const rows = await query<Vacancy>(
+    `select id, source, title, company, description, url, published_at, city,
+            salary_min, salary_max, salary_currency
+     from vacancies
+     where rtrim(url, '/') = rtrim($1, '/') and is_active = true
+     order by last_seen_at desc
+     limit 1`,
+    [rawUrl],
+  );
+  return rows[0] ?? null;
+}
+
 // Пользователь прислал в чат прямую ссылку на вакансию (необязательно с
 // сайтов, которые скрапит ua_jobs_parser) — качаем страницу, вытаскиваем
 // текст и кладём как обычную запись в vacancies (source='external_link'),

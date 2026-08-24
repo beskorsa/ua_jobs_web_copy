@@ -21,8 +21,9 @@ type ChatMessage = {
 };
 
 const INTRO =
-  "Привіт! Введіть ключові слова для пошуку вакансій, завантажте резюме (PDF) — " +
-  "підберу вакансії під нього, або запитайте в чаті про cover letter чи поради, як покращити резюме.";
+  "Привіт! Введіть ключові слова для пошуку вакансій, вставте посилання на конкретну вакансію " +
+  "для аналізу, або завантажте резюме (PDF) — підберу вакансії під нього. Після цього тут " +
+  "з'явиться чат: можна буде попросити cover letter, поради по резюме або запитати про вакансію.";
 
 function SkeletonGrid({ count = 6 }: { count?: number }) {
   return (
@@ -54,19 +55,32 @@ export default function Home() {
   const [searching, setSearching] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
+  const [started, setStarted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const busy = searching || uploading || chatBusy;
+  const isUrl = /^https?:\/\/\S+$/i.test(query.trim());
 
   function pushError(err: unknown) {
     const text = err instanceof Error ? err.message : String(err);
     setMessages((m) => [...m, { role: "assistant", content: text, isError: true }]);
   }
 
+  // Якщо в полі пошуку посилання — це не ключові слова, а вакансія для
+  // розбору: маршрутизуємо через /api/chat (analyze_vacancy_link), а не
+  // /api/search. Головне поле пошуку — тепер єдина точка входу і для
+  // ключових слів, і для лінків, бо чат-панель з'являється лише після
+  // першої дії.
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
     const q = query.trim();
     if (!q || busy) return;
+
+    if (isUrl) {
+      await submitLink(q);
+      return;
+    }
+
     setSearching(true);
     try {
       const res = await fetch("/api/search", {
@@ -82,6 +96,45 @@ export default function Home() {
         { role: "user", content: q },
         { role: "assistant", content: `Знайшов ${data.results.length} вакансій.`, vacancies: data.results },
       ]);
+      setStarted(true);
+      setQuery("");
+    } catch (err) {
+      pushError(err);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function submitLink(url: string) {
+    setSearching(true);
+    setMessages((m) => [...m, { role: "user", content: url }]);
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: url,
+          resumeId,
+          shownVacancies: vacancies.map((v) => ({ id: v.id, title: v.title })),
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      if (data.results) setVacancies(data.results);
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: data.reply,
+          vacancies: data.results ?? undefined,
+          coverLetter:
+            data.action === "cover_letter"
+              ? { ...data.coverLetter, vacancyTitle: data.vacancy?.title }
+              : undefined,
+        },
+      ]);
+      setStarted(true);
+      setQuery("");
     } catch (err) {
       pushError(err);
     } finally {
@@ -111,6 +164,7 @@ export default function Home() {
           vacancies: data.results,
         },
       ]);
+      setStarted(true);
     } catch (err) {
       pushError(err);
     } finally {
@@ -192,19 +246,22 @@ export default function Home() {
       <header className="page__header">
         <span className="page__kicker">AI-пошук роботи</span>
         <h1>Пошук вакансій з AI</h1>
-        <p>Введіть ключові слова або завантажте резюме — покажу релевантні вакансії, напишу cover letter і дам поради.</p>
+        <p>
+          Введіть ключові слова, вставте посилання на вакансію або завантажте резюме — покажу релевантні
+          вакансії, напишу cover letter і дам поради.
+        </p>
       </header>
 
       <section className="controls">
         <form onSubmit={handleSearch} className="search-form">
           <input
             type="text"
-            placeholder="Наприклад: python розробник, віддалено, Київ"
+            placeholder="Ключові слова (python розробник, віддалено) або посилання на вакансію"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           <button type="submit" disabled={busy || !query.trim()}>
-            {searching ? "Шукаю…" : "Знайти"}
+            {searching ? (isUrl ? "Аналізую…" : "Шукаю…") : isUrl ? "Аналізувати" : "Знайти"}
           </button>
         </form>
         <label className={`upload-button${resumeSummary ? " upload-button--done" : ""}`}>
@@ -241,6 +298,7 @@ export default function Home() {
 
       {searching || uploading ? <SkeletonGrid /> : <VacancyList vacancies={vacancies} />}
 
+      {started && (
       <section className="chat">
         <div className="chat__messages">
           {messages.map((m, i) => (
@@ -287,6 +345,7 @@ export default function Home() {
           </button>
         </form>
       </section>
+      )}
     </main>
   );
 }

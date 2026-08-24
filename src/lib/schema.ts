@@ -115,5 +115,34 @@ export async function ensureSchema(): Promise<void> {
   `);
   await query("create index if not exists idx_chat_messages_user on chat_messages (user_id, created_at);");
 
+  // rate-limit: по одной строке на каждый запрос, который стоит денег
+  // (OpenAI вызовы) — см. src/lib/rateLimit.ts. bucket разделяет разные виды
+  // запросов (search/resume/chat/...), чтобы лимиты не мешали друг другу.
+  await query(`
+    create table if not exists rate_limit_hits (
+      id          bigint generated always as identity primary key,
+      user_id     uuid not null references web_users(id) on delete cascade,
+      bucket      text not null,
+      created_at  timestamptz not null default now()
+    );
+  `);
+  await query("create index if not exists idx_rate_limit_hits_lookup on rate_limit_hits (user_id, bucket, created_at);");
+
+  // Обратная связь сайт -> парсер: реальные запросы пользователей (поиск,
+  // чат, факт загрузки резюме), которые Python-скрипт suggest_keywords.py
+  // читает, чтобы предложить новые ключевые слова для keywords.csv. См.
+  // src/lib/searchLog.ts.
+  await query(`
+    create table if not exists search_queries (
+      id             bigint generated always as identity primary key,
+      user_id        uuid not null references web_users(id) on delete cascade,
+      source         text not null,
+      query          text not null,
+      results_count  int,
+      created_at     timestamptz not null default now()
+    );
+  `);
+  await query("create index if not exists idx_search_queries_created on search_queries (created_at);");
+
   ensured = true;
 }

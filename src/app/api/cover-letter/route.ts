@@ -6,11 +6,17 @@ import { getOrCreateUserId } from "@/lib/user";
 import { getVacancy } from "@/lib/vacancies";
 import { scoreVacancy, saveGeneration } from "@/lib/generate";
 import { query } from "@/lib/db";
+import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
 
 export async function POST(req: NextRequest) {
   try {
     await ensureSchema();
-    await getOrCreateUserId();
+    const userId = await getOrCreateUserId();
+
+    const limit = await checkRateLimit(userId, "cover_letter", 15, 3600); // 15 / год
+    if (!limit.allowed) {
+      return NextResponse.json(rateLimitResponseBody(limit.retryAfterSeconds), { status: 429 });
+    }
 
     const { resumeId, vacancyId } = await req.json();
     if (!resumeId || !vacancyId) {

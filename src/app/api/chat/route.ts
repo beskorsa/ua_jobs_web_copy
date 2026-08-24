@@ -8,6 +8,8 @@ import { getOpenAI, CHAT_MODEL, embedText } from "@/lib/openai";
 import { semanticSearch, getVacancy } from "@/lib/vacancies";
 import { scoreVacancy, saveGeneration, getResumeImprovementTips } from "@/lib/generate";
 import { query } from "@/lib/db";
+import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
+import { logSearchQuery } from "@/lib/searchLog";
 
 // Интерактивный чат — единая точка входа для всех 4 сценариев с главной
 // страницы: (1) поиск за ключовими словами, (2) — сам факт завантаження
@@ -67,6 +69,11 @@ export async function POST(req: NextRequest) {
     await ensureSchema();
     const userId = await getOrCreateUserId();
 
+    const limit = await checkRateLimit(userId, "chat", 20, 600); // 20 повідомлень / 10 хв
+    if (!limit.allowed) {
+      return NextResponse.json(rateLimitResponseBody(limit.retryAfterSeconds), { status: 429 });
+    }
+
     const body = await req.json();
     const message: string = body.message;
     const resumeId: number | undefined = body.resumeId || undefined;
@@ -111,7 +118,8 @@ export async function POST(req: NextRequest) {
       if (toolCall.function.name === "search_vacancies") {
         const q = String(args.query || message);
         const vec = await embedText(q);
-        const results = await semanticSearch(vec, 10);
+        const results = await semanticSearch(vec, 30);
+        await logSearchQuery(userId, "chat", q, results.length);
         payload = { action: "search", results };
         reply = results.length
           ? `Знайшов ${results.length} вакансій за запитом «${q}».`

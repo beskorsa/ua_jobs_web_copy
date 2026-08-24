@@ -10,6 +10,8 @@ import {
   storeResumeEmbedding,
   matchVacanciesForResume,
 } from "@/lib/resumes";
+import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
+import { logSearchQuery } from "@/lib/searchLog";
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 МБ — щедро для резюме, отсекает случайный не-тот файл
 
@@ -17,6 +19,11 @@ export async function POST(req: NextRequest) {
   try {
     await ensureSchema();
     const userId = await getOrCreateUserId();
+
+    const limit = await checkRateLimit(userId, "resume", 5, 3600); // 5 завантажень / год
+    if (!limit.allowed) {
+      return NextResponse.json(rateLimitResponseBody(limit.retryAfterSeconds), { status: 429 });
+    }
 
     const form = await req.formData();
     const file = form.get("file");
@@ -44,8 +51,10 @@ export async function POST(req: NextRequest) {
 
     const [summary, results] = await Promise.all([
       summarizeResume(text),
-      matchVacanciesForResume(resumeId, 10),
+      matchVacanciesForResume(resumeId, 30),
     ]);
+
+    await logSearchQuery(userId, "resume", summary, results.length);
 
     return NextResponse.json({ resumeId, summary, results });
   } catch (e: any) {

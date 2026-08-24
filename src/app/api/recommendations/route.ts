@@ -5,11 +5,17 @@ import { ensureSchema } from "@/lib/schema";
 import { getOrCreateUserId } from "@/lib/user";
 import { getResumeImprovementTips } from "@/lib/generate";
 import { query } from "@/lib/db";
+import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
 
 export async function POST(req: NextRequest) {
   try {
     await ensureSchema();
-    await getOrCreateUserId();
+    const userId = await getOrCreateUserId();
+
+    const limit = await checkRateLimit(userId, "recommendations", 15, 3600); // 15 / год
+    if (!limit.allowed) {
+      return NextResponse.json(rateLimitResponseBody(limit.retryAfterSeconds), { status: 429 });
+    }
 
     const { resumeId } = await req.json();
     if (!resumeId) {

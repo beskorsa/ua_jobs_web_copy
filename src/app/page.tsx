@@ -17,11 +17,32 @@ type ChatMessage = {
   vacancies?: VacancyCardData[];
   coverLetter?: CoverLetter;
   tips?: string[];
+  isError?: boolean;
 };
 
 const INTRO =
   "Привіт! Введіть ключові слова для пошуку вакансій, завантажте резюме (PDF) — " +
   "підберу вакансії під нього, або запитайте в чаті про cover letter чи поради, як покращити резюме.";
+
+function SkeletonGrid({ count = 6 }: { count?: number }) {
+  return (
+    <div className="skeleton-grid" aria-hidden="true">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="skeleton-card" style={{ "--i": i } as React.CSSProperties} />
+      ))}
+    </div>
+  );
+}
+
+function TypingBubble() {
+  return (
+    <div className="chat__bubble chat__bubble--assistant chat__bubble--typing" aria-label="Асистент друкує">
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
 
 export default function Home() {
   const [query, setQuery] = useState("");
@@ -30,19 +51,23 @@ export default function Home() {
   const [resumeSummary, setResumeSummary] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([{ role: "assistant", content: INTRO }]);
   const [chatInput, setChatInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [chatBusy, setChatBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const busy = searching || uploading || chatBusy;
 
   function pushError(err: unknown) {
     const text = err instanceof Error ? err.message : String(err);
-    setMessages((m) => [...m, { role: "assistant", content: `Помилка: ${text}` }]);
+    setMessages((m) => [...m, { role: "assistant", content: text, isError: true }]);
   }
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
     const q = query.trim();
-    if (!q) return;
-    setLoading(true);
+    if (!q || busy) return;
+    setSearching(true);
     try {
       const res = await fetch("/api/search", {
         method: "POST",
@@ -60,14 +85,14 @@ export default function Home() {
     } catch (err) {
       pushError(err);
     } finally {
-      setLoading(false);
+      setSearching(false);
     }
   }
 
   async function handleUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setLoading(true);
+    setUploading(true);
     try {
       const form = new FormData();
       form.append("file", file);
@@ -89,7 +114,7 @@ export default function Home() {
     } catch (err) {
       pushError(err);
     } finally {
-      setLoading(false);
+      setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
@@ -97,10 +122,10 @@ export default function Home() {
   async function handleChatSend(e: FormEvent) {
     e.preventDefault();
     const text = chatInput.trim();
-    if (!text) return;
+    if (!text || busy) return;
     setChatInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
-    setLoading(true);
+    setChatBusy(true);
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -124,7 +149,7 @@ export default function Home() {
           vacancies: data.action === "search" ? data.results : undefined,
           coverLetter:
             data.action === "cover_letter"
-              ? { ...data, vacancyTitle: data.vacancy?.title }
+              ? { ...data.coverLetter, vacancyTitle: data.vacancy?.title }
               : undefined,
           tips: data.action === "recommendations" ? data.tips : undefined,
         },
@@ -132,13 +157,14 @@ export default function Home() {
     } catch (err) {
       pushError(err);
     } finally {
-      setLoading(false);
+      setChatBusy(false);
     }
   }
 
   return (
     <main className="page">
       <header className="page__header">
+        <span className="page__kicker">AI-пошук роботи</span>
         <h1>Пошук вакансій з AI</h1>
         <p>Введіть ключові слова або завантажте резюме — покажу релевантні вакансії, напишу cover letter і дам поради.</p>
       </header>
@@ -151,31 +177,58 @@ export default function Home() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <button type="submit" disabled={loading}>
-            Знайти
+          <button type="submit" disabled={busy || !query.trim()}>
+            {searching ? "Шукаю…" : "Знайти"}
           </button>
         </form>
-        <label className="upload-button">
-          {resumeSummary ? "Резюме завантажено ✓ (завантажити інше)" : "Завантажити резюме (PDF)"}
-          <input ref={fileInputRef} type="file" accept="application/pdf" onChange={handleUpload} hidden />
+        <label className={`upload-button${resumeSummary ? " upload-button--done" : ""}`}>
+          <svg className="upload-button__icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
+            {resumeSummary ? (
+              <path
+                d="M20 6L9 17l-5-5"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ) : (
+              <path
+                d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            )}
+          </svg>
+          {uploading ? "Завантажую…" : resumeSummary ? "Резюме завантажено (замінити)" : "Завантажити резюме (PDF)"}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            onChange={handleUpload}
+            hidden
+            disabled={busy}
+          />
         </label>
       </section>
 
-      {loading && <p className="loading">Завантаження…</p>}
-
-      <VacancyList vacancies={vacancies} />
+      {searching || uploading ? <SkeletonGrid /> : <VacancyList vacancies={vacancies} />}
 
       <section className="chat">
         <div className="chat__messages">
           {messages.map((m, i) => (
-            <div key={i} className={`chat__bubble chat__bubble--${m.role}`}>
-              <p>{m.content}</p>
+            <div
+              key={i}
+              className={`chat__bubble chat__bubble--${m.role}`}
+            >
+              {m.isError ? <p className="rate-limit-note">{m.content}</p> : <p>{m.content}</p>}
               {m.vacancies && <VacancyList vacancies={m.vacancies} />}
               {m.coverLetter && (
                 <div className="cover-letter">
-                  <p>
-                    <strong>{m.coverLetter.vacancyTitle}</strong> — релевантність {m.coverLetter.relevance}/10
-                  </p>
+                  <span className="cover-letter__score">
+                    {m.coverLetter.vacancyTitle} · {m.coverLetter.relevance}/10
+                  </span>
                   <p>{m.coverLetter.reasoning}</p>
                   <ol>
                     {m.coverLetter.coverLetterSentences.map((s, j) => (
@@ -193,6 +246,7 @@ export default function Home() {
               )}
             </div>
           ))}
+          {chatBusy && <TypingBubble />}
         </div>
         <form onSubmit={handleChatSend} className="chat__input">
           <input
@@ -200,8 +254,9 @@ export default function Home() {
             placeholder="Запитайте про cover letter, поради по резюме, або уточніть пошук…"
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
+            disabled={busy}
           />
-          <button type="submit" disabled={loading}>
+          <button type="submit" disabled={busy || !chatInput.trim()}>
             Надіслати
           </button>
         </form>

@@ -3,6 +3,7 @@
 import { useRef, useState, type FormEvent, type ChangeEvent } from "react";
 import { VacancyList } from "@/components/VacancyList";
 import type { VacancyCardData } from "@/components/VacancyCard";
+import { TagInput } from "@/components/TagInput";
 
 type CoverLetter = {
   relevance: number;
@@ -37,6 +38,8 @@ function TypingBubble() {
 
 export default function Home() {
   const [query, setQuery] = useState("");
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [minusKeywords, setMinusKeywords] = useState<string[]>([]);
   const [vacancies, setVacancies] = useState<VacancyCardData[]>([]);
   const [resumeId, setResumeId] = useState<number | null>(null);
   const [resumeSummary, setResumeSummary] = useState<string | null>(null);
@@ -94,6 +97,39 @@ export default function Home() {
       ]);
       setStarted(true);
       setQuery("");
+    } catch (err) {
+      pushError(err);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  // Пошук за тегами (ключові / мінус-слова) — окрема від головного поля
+  // точка входу: тут завжди йде саме структурований пошук у /api/search
+  // (з excludeTerms на рівні SQL), а не free-form текст/лінк.
+  async function handleKeywordSearch(e: FormEvent) {
+    e.preventDefault();
+    if (!keywords.length || busy) return;
+
+    setSearching(true);
+    try {
+      const res = await fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keywords, minusKeywords }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setVacancies(data.results);
+      const label = minusKeywords.length
+        ? `${keywords.join(", ")} (виключити: ${minusKeywords.join(", ")})`
+        : keywords.join(", ");
+      setMessages((m) => [
+        ...m,
+        { role: "user", content: label },
+        { role: "assistant", content: `Знайшов ${data.results.length} вакансій.`, vacancies: data.results },
+      ]);
+      setStarted(true);
     } catch (err) {
       pushError(err);
     } finally {
@@ -265,6 +301,30 @@ export default function Home() {
           />
         </label>
       </section>
+
+      <form onSubmit={handleKeywordSearch} className="keyword-panel">
+        <TagInput
+          kind="include"
+          label="Ключові слова"
+          placeholder="python, віддалено, senior…"
+          tags={keywords}
+          onChange={setKeywords}
+          disabled={busy}
+        />
+        <TagInput
+          kind="exclude"
+          label="Мінус-слова"
+          placeholder="стажування, php…"
+          tags={minusKeywords}
+          onChange={setMinusKeywords}
+          disabled={busy}
+        />
+        <div className="keyword-panel__submit">
+          <button type="submit" disabled={busy || !keywords.length}>
+            {searching ? "Шукаю…" : "Пошук за тегами"}
+          </button>
+        </div>
+      </form>
 
       {started && (
       <section className="chat">

@@ -36,7 +36,26 @@ export type Vacancy = {
 // distinct on (v.id) + сортировка/limit во внешнем запросе (см. комментарий
 // там же: LIMIT на внутреннем запросе резал бы по возрастанию id, а не по
 // релевантности).
-export async function semanticSearch(queryEmbedding: number[], topK = 10): Promise<VacancyResult[]> {
+//
+// excludeTerms — мінус-слова з тег-інпуту на фронті (див. keywords.ts):
+// вакансія відсіюється, якщо будь-яке з них зустрічається в назві чи описі
+// (регістронезалежно). Фільтр на рівні SQL, а не постфільтрація в JS —
+// щоб LIMIT рахувався вже після відсіву, а не обрізав видачу до фільтра.
+export async function semanticSearch(
+  queryEmbedding: number[],
+  topK = 10,
+  excludeTerms: string[] = [],
+): Promise<VacancyResult[]> {
+  const cleanExcludes = excludeTerms.map((t) => t.trim()).filter(Boolean);
+  const excludeClause = cleanExcludes.length
+    ? `and not exists (
+         select 1 from unnest($3::text[]) as ex(term)
+         where v.title ilike '%' || ex.term || '%' or v.description ilike '%' || ex.term || '%'
+       )`
+    : "";
+  const params: unknown[] = [vecToPg(queryEmbedding), topK];
+  if (cleanExcludes.length) params.push(cleanExcludes);
+
   const sql = `
     select id, source, title, company, url, published_at, city,
            salary_min, salary_max, salary_currency, matched_chunk, distance
@@ -49,12 +68,13 @@ export async function semanticSearch(queryEmbedding: number[], topK = 10): Promi
       from vacancy_chunks c
       join vacancies v on v.id = c.vacancy_id
       where v.is_active = true
+      ${excludeClause}
       order by v.id, distance asc
     ) matched
     order by distance asc
     limit $2
   `;
-  return query<VacancyResult>(sql, [vecToPg(queryEmbedding), topK]);
+  return query<VacancyResult>(sql, params);
 }
 
 export async function getVacancy(id: number): Promise<Vacancy | null> {

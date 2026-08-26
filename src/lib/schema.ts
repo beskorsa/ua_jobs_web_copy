@@ -144,5 +144,26 @@ export async function ensureSchema(): Promise<void> {
   `);
   await query("create index if not exists idx_search_queries_created on search_queries (created_at);");
 
+  // Словник ключових слів / мінус-слів для автопідказок у пошуку (див.
+  // src/lib/keywords.ts). "kind" розділяє два незалежних списки: звичайні
+  // ключові слова (include) і мінус-слова для виключення (exclude) —
+  // одне й те саме слово теоретично може бути в обох. usage_count росте
+  // з кожним новим використанням — підказки сортуються за популярністю.
+  await query(`
+    create table if not exists search_keywords (
+      id           bigint generated always as identity primary key,
+      term         text not null,
+      kind         text not null check (kind in ('include', 'exclude')),
+      usage_count  int not null default 1,
+      created_at   timestamptz not null default now()
+    );
+  `);
+  await query(
+    "create unique index if not exists idx_search_keywords_uniq on search_keywords (lower(term), kind);",
+  );
+  await query(
+    "create index if not exists idx_search_keywords_prefix on search_keywords (kind, usage_count desc);",
+  );
+
   ensured = true;
 }

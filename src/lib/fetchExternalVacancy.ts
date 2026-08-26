@@ -56,6 +56,42 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+// Деякі посилання, які надсилають користувачі, — це не публічна вакансія, а
+// приватна сторінка їхнього ж кабінету (моє резюме, профіль, дашборд тощо):
+// work.ua/jobseeker/my/resumes/view/?id=... і подібні. Такі сторінки НЕ
+// віддаються без логіну взагалі — жоден User-Agent-трюк це не обійде (на
+// відміну від бот-захисту публічних сторінок вакансій, де 403 іноді можна
+// обійти). Розпізнаємо за URL заздалегідь і одразу пояснюємо користувачу, що
+// сталось, замість голого "сайт повернув 403" — саме так сталось, коли
+// надіслали посилання на власне резюме work.ua замість вакансії.
+const PRIVATE_ACCOUNT_PATH_HINTS = [
+  /\/jobseeker\/my\//i,
+  /\/employer\/my\//i,
+  /\/my\/(resumes?|profile|account|cabinet|dashboard)/i,
+  /\/(account|profile|dashboard|cabinet)\//i,
+];
+
+function looksLikePrivateAccountPage(url: URL): boolean {
+  return PRIVATE_ACCOUNT_PATH_HINTS.some((re) => re.test(url.pathname));
+}
+
+// work.ua — окремий випадок: приватне посилання на власне резюме
+// (/jobseeker/my/resumes/view/?id=NNN, видно лише залогіненому власнику)
+// насправді має публічний відповідник — /resumes/NNN/ (та сама анкета,
+// як її бачить роботодавець без входу в акаунт власника). Переписуємо URL
+// на публічний ДО перевірки looksLikePrivateAccountPage, тож такі посилання
+// не відхиляються, а обробляються як звичайна публічна сторінка.
+function normalizeVacancyUrl(url: URL): URL {
+  const isWorkUa = /(^|\.)work\.ua$/i.test(url.hostname);
+  if (isWorkUa && /^\/jobseeker\/my\/resumes\/view\/?$/i.test(url.pathname)) {
+    const id = url.searchParams.get("id");
+    if (id && /^\d+$/.test(id)) {
+      return new URL(`https://www.work.ua/resumes/${id}/`);
+    }
+  }
+  return url;
+}
+
 export type FetchedVacancyPage = { title: string; text: string; finalUrl: string };
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -72,8 +108,17 @@ export async function fetchVacancyPage(rawUrl: string): Promise<FetchedVacancyPa
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Підтримуються лише http/https посилання");
   }
+  url = normalizeVacancyUrl(url);
   if (isPrivateHostname(url.hostname)) {
     throw new Error("Це посилання недоступне");
+  }
+  if (looksLikePrivateAccountPage(url)) {
+    throw new Error(
+      "Схоже, це посилання на приватну сторінку особистого кабінету (потрібен вхід у ваш акаунт на сайті) — " +
+        "сайт не віддасть її без логіну. Якщо хотіли, щоб я врахував ваше резюме, — завантажте його файлом " +
+        "через кнопку «Завантажити резюме» вище. Якщо це мала бути вакансія — вставте публічне посилання на " +
+        "саме оголошення (сторінка, яку видно без входу в акаунт).",
+    );
   }
 
   const controller = new AbortController();

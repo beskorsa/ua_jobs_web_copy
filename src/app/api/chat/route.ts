@@ -5,6 +5,7 @@ import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { ensureSchema } from "@/lib/schema";
 import { getOrCreateUserId } from "@/lib/user";
 import { getOpenAI, CHAT_MODEL, embedText } from "@/lib/openai";
+import { logTokenUsage } from "@/lib/tokenUsage";
 import { semanticSearch, getVacancy, getVacancyByUrl, upsertExternalVacancy, upsertVacancyFromText } from "@/lib/vacancies";
 import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy } from "@/lib/generate";
 import { getLatestResumeIdForUser } from "@/lib/resumes";
@@ -146,6 +147,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Порожнє повідомлення" }, { status: 400 });
     }
 
+    // Історія чату цього user_id вже писалась в chat_messages, але ніколи
+    // не читалась назад — саме тому чат "не пам'ятав" попередні репліки
+    // (запитання на кшталт "розкажи про мої скіли" чи "ти пам'ятаєш моє
+    // резюме?" отримували відповідь без жодного контексту). Підтягуємо
+    // останні кілька повідомлень ДО того, як вставити нове — і в router, і
+    // в загальну відповідь нижче.
+    const HISTORY_LIMIT = 10;
+    const historyRows = await query<{ role: string; content: string }>(
+      `select role, content from chat_messages where user_id = $1 order by created_at desc limit $2`,
+      [userId, HISTORY_LIMIT],
+    );
+    const history = historyRows
+      .reverse()
+      .map((r) => ({ role: r.role as "user" | "assistant", content: r.content }));
+
     await query(`insert into chat_messages (user_id, role, content) values ($1, 'user', $2)`, [userId, message]);
 
     const openai = getOpenAI();
@@ -164,12 +180,16 @@ export async function POST(req: NextRequest) {
             "повідомлення — це вставлений цілий текст вакансії без URL (довгий опис посади, вимог " +
             "тощо, а не пошуковий запит) — analyze_vacancy_text; питання про вже показану вакансію, " +
             "яке не є проханням про cover letter — ask_about_vacancy). Якщо " +
-            "жоден інструмент не підходить (загальне питання, привітання, подяка) — просто відповідай " +
-            "сам, коротко, українською, без інструменту.",
+            "жоден інструмент не підходить (загальне питання, привітання, подяка, питання про власне " +
+            "резюме користувача — навички, досвід, чи воно завантажене) — просто відповідай сам, " +
+            "коротко, українською, без інструменту; на такі загальні питання нижче буде додано " +
+            "окремий контекст із резюме.",
         },
+        ...history,
         { role: "user", content: message },
       ],
     });
+    await logTokenUsage("chat_router", CHAT_MODEL, routerResp.usage, userId);
 
     const choice = routerResp.choices[0];
     const toolCall = choice.message.tool_calls?.[0];
@@ -178,13 +198,46 @@ export async function POST(req: NextRequest) {
     let payload: Record<string, unknown> = {};
 
     if (!toolCall || toolCall.type !== "function") {
-      reply = choice.message.content?.trim() || "Не зовсім зрозумів запит — спробуйте переформулювати.";
+      // Жоден інструмент не підійшов — типово це загальне питання, зокрема
+      // про власне резюме користувача ("розкажи про мої скіли", "ти
+      // пам'ятаєш моє резюме?"). Router-виклик вище не бачив тексту резюме
+      // взагалі (тільки tool-описи), тому без цього другого виклику він
+      // завжди чесно відповідав "не маю доступу" — хоча резюме в базі є.
+      const resumeRow = resumeId
+        ? (await query<{ raw_text: string }>(`select raw_text from resumes where id = $1`, [resumeId]))[0]
+        : undefined;
+
+      if (resumeRow?.raw_text) {
+        const grounded = await openai.chat.completions.create({
+          model: CHAT_MODEL,
+          temperature: 0.3,
+          messages: [
+            {
+              role: "system",
+              content:
+                "Ти — асистент пошуку роботи. У користувача є завантажене резюме — використовуй його " +
+                "зміст, щоб відповідати на питання про навички, досвід, освіту тощо. Відповідай коротко " +
+                "й по суті, українською.\n\nРЕЗЮМЕ КОРИСТУВАЧА:\n" +
+                resumeRow.raw_text.slice(0, 8000),
+            },
+            ...history,
+            { role: "user", content: message },
+          ],
+        });
+        await logTokenUsage("chat_grounded_fallback", CHAT_MODEL, grounded.usage, userId);
+        reply =
+          grounded.choices[0].message.content?.trim() ||
+          choice.message.content?.trim() ||
+          "Не зовсім зрозумів запит — спробуйте переформулювати.";
+      } else {
+        reply = choice.message.content?.trim() || "Не зовсім зрозумів запит — спробуйте переформулювати.";
+      }
     } else {
       const args = JSON.parse(toolCall.function.arguments || "{}");
 
       if (toolCall.function.name === "search_vacancies") {
         const q = String(args.query || message);
-        const vec = await embedText(q);
+        const vec = await embedText(q, "embed_chat_search", userId);
         const results = await semanticSearch(vec, 30);
         await logSearchQuery(userId, "chat", q, results.length);
         payload = { action: "search", results };
@@ -206,7 +259,7 @@ export async function POST(req: NextRequest) {
           if (!resumeRows.length || !vacancy) {
             reply = "Не вдалось знайти резюме або вакансію в базі.";
           } else {
-            const result = await scoreVacancy(resumeRows[0].raw_text, vacancy);
+            const result = await scoreVacancy(resumeRows[0].raw_text, vacancy, userId);
             await saveGeneration(resumeId, target.id, result);
             payload = { action: "cover_letter", coverLetter: result, vacancy };
             reply = `Ось варіанти cover letter для «${vacancy.title}» (релевантність ${result.relevance}/10):`;
@@ -220,7 +273,7 @@ export async function POST(req: NextRequest) {
           if (!rows.length) {
             reply = "Резюме не знайдено в базі.";
           } else {
-            const tips = await getResumeImprovementTips(rows[0].raw_text);
+            const tips = await getResumeImprovementTips(rows[0].raw_text, userId);
             payload = { action: "recommendations", tips };
             reply = "Ось що можна покращити в резюме:";
           }
@@ -247,7 +300,7 @@ export async function POST(req: NextRequest) {
                 resumeId,
               ]);
               if (resumeRows.length) {
-                const result = await scoreVacancy(resumeRows[0].raw_text, vacancy);
+                const result = await scoreVacancy(resumeRows[0].raw_text, vacancy, userId);
                 await saveGeneration(resumeId, vacancy.id, result);
                 payload = { action: "cover_letter", results: [vacancy], coverLetter: result, vacancy };
                 reply = `Розібрав вакансію «${vacancy.title}» — релевантність ${result.relevance}/10:`;
@@ -282,7 +335,7 @@ export async function POST(req: NextRequest) {
                 resumeId,
               ]);
               if (resumeRows.length) {
-                const result = await scoreVacancy(resumeRows[0].raw_text, vacancy);
+                const result = await scoreVacancy(resumeRows[0].raw_text, vacancy, userId);
                 await saveGeneration(resumeId, vacancy.id, result);
                 payload = { action: "cover_letter", results: [vacancy], coverLetter: result, vacancy };
                 reply = `Розібрав вакансію «${vacancy.title}» — релевантність ${result.relevance}/10:`;
@@ -316,7 +369,7 @@ export async function POST(req: NextRequest) {
               ]);
               resumeText = rows[0]?.raw_text ?? null;
             }
-            reply = await answerAboutVacancy(vacancy, question, resumeText);
+            reply = await answerAboutVacancy(vacancy, question, resumeText, userId);
           }
         }
       }

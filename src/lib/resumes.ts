@@ -2,6 +2,7 @@ import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 import { query } from "./db";
 import { embedTexts, getOpenAI, CHAT_MODEL } from "./openai";
+import { logTokenUsage } from "./tokenUsage";
 import { embedAsSingleVector } from "./chunk";
 import { vecToPg, pgToVec } from "./vector";
 import { semanticSearch, type VacancyResult } from "./vacancies";
@@ -64,7 +65,7 @@ export async function extractResumeText(buffer: Buffer, fileType: ResumeFileType
   return extractPdfText(buffer);
 }
 
-export async function summarizeResume(text: string): Promise<string> {
+export async function summarizeResume(text: string, userId?: string | null): Promise<string> {
   const openai = getOpenAI();
   const resp = await openai.chat.completions.create({
     model: CHAT_MODEL,
@@ -79,6 +80,7 @@ export async function summarizeResume(text: string): Promise<string> {
       { role: "user", content: text.slice(0, 12000) },
     ],
   });
+  await logTokenUsage("resume_summary", CHAT_MODEL, resp.usage, userId);
   return resp.choices[0].message.content?.trim() || "";
 }
 
@@ -107,8 +109,12 @@ export async function upsertResume(userId: string, filename: string, rawText: st
   return rows[0].id;
 }
 
-export async function storeResumeEmbedding(resumeId: number, text: string): Promise<void> {
-  const vec = await embedAsSingleVector(text, embedTexts);
+export async function storeResumeEmbedding(
+  resumeId: number,
+  text: string,
+  userId?: string | null,
+): Promise<void> {
+  const vec = await embedAsSingleVector(text, (chunks) => embedTexts(chunks, "embed_resume", userId));
   await query(`delete from resume_sections where resume_id = $1`, [resumeId]);
   await query(
     `insert into resume_sections (resume_id, section, content, embedding) values ($1, 'full', $2, $3)`,
@@ -120,6 +126,7 @@ export async function matchVacanciesForResume(
   resumeId: number,
   resumeText: string,
   topK = 15,
+  userId?: string | null,
 ): Promise<VacancyResult[]> {
   const rows = await query<{ embedding: string }>(
     `select embedding from resume_sections where resume_id = $1 and section = 'full'`,
@@ -134,5 +141,5 @@ export async function matchVacanciesForResume(
   // а не просто підтверджувати перші topK.
   const poolSize = Math.max(topK * 3, 40);
   const candidates = await semanticSearch(vec, poolSize);
-  return filterRelevantVacancies(resumeText, candidates, topK);
+  return filterRelevantVacancies(resumeText, candidates, topK, userId);
 }

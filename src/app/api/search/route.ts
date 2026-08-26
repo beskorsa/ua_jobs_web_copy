@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     // Мінус-слова НЕ підмішуємо в текст для ембеддингу (це зіпсувало б сам
     // пошуковий вектор, притягуючи саме те, що треба виключити) — вони йдуть
     // окремим SQL-фільтром у semanticSearch.
-    const vec = await embedText(queryText);
+    const vec = await embedText(queryText, "embed_search", userId);
     const results = await semanticSearch(vec, topK, minusKeywords, learnedExclusions);
 
     const logLabel = minusKeywords.length ? `${queryText} (-${minusKeywords.join(", -")})` : queryText;

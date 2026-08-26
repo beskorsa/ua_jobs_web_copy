@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { logTokenUsage, type TokenUsageKind } from "./tokenUsage";
 
 let client: OpenAI | null = null;
 
@@ -19,12 +20,20 @@ export function getOpenAI(): OpenAI {
 export const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
 export const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 
-export async function embedText(text: string): Promise<number[]> {
-  const vectors = await embedTexts([text]);
+export async function embedText(
+  text: string,
+  kind: TokenUsageKind = "embed_search",
+  userId?: string | null,
+): Promise<number[]> {
+  const vectors = await embedTexts([text], kind, userId);
   return vectors[0];
 }
 
-export async function embedTexts(texts: string[]): Promise<number[][]> {
+export async function embedTexts(
+  texts: string[],
+  kind: TokenUsageKind = "embed_search",
+  userId?: string | null,
+): Promise<number[][]> {
   const openai = getOpenAI();
   const out: number[][] = [];
   const batchSize = 96; // тот же лимит, что в embeddings.py OpenAIEmbedder
@@ -32,6 +41,7 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
     const batch = texts.slice(i, i + batchSize);
     const resp = await openai.embeddings.create({ model: EMBEDDING_MODEL, input: batch });
     out.push(...resp.data.map((d) => d.embedding));
+    await logTokenUsage(kind, EMBEDDING_MODEL, resp.usage, userId);
   }
   return out;
 }

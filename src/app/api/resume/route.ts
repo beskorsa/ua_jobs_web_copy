@@ -59,11 +59,11 @@ export async function POST(req: NextRequest) {
     }
 
     const resumeId = await upsertResume(userId, file.name, text);
-    await storeResumeEmbedding(resumeId, text);
+    await storeResumeEmbedding(resumeId, text, userId);
 
     const [summary, results] = await Promise.all([
-      summarizeResume(text),
-      matchVacanciesForResume(resumeId, text, 15),
+      summarizeResume(text, userId),
+      matchVacanciesForResume(resumeId, text, 15, userId),
     ]);
 
     await logSearchQuery(userId, "resume", summary, results.length);

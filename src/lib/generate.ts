@@ -1,5 +1,6 @@
 import { getOpenAI, CHAT_MODEL } from "./openai";
 import { query } from "./db";
+import { logTokenUsage } from "./tokenUsage";
 import type { Vacancy, VacancyResult } from "./vacancies";
 
 // Тот же промпт, что в ua_jobs_parser/generate.py (SYSTEM_PROMPT) — держим
@@ -30,6 +31,7 @@ export type GenerationResult = {
 export async function scoreVacancy(
   resumeText: string,
   vacancy: Pick<Vacancy, "title" | "company" | "description">,
+  userId?: string | null,
 ): Promise<GenerationResult> {
   const openai = getOpenAI();
   const resp = await openai.chat.completions.create({
@@ -47,6 +49,7 @@ export async function scoreVacancy(
       },
     ],
   });
+  await logTokenUsage("score_vacancy", CHAT_MODEL, resp.usage, userId);
 
   const raw = resp.choices[0].message.content || "{}";
   let data: any;
@@ -88,6 +91,7 @@ export async function answerAboutVacancy(
   vacancy: Pick<Vacancy, "title" | "company" | "description" | "url">,
   question: string,
   resumeText: string | null,
+  userId?: string | null,
 ): Promise<string> {
   const openai = getOpenAI();
   const resp = await openai.chat.completions.create({
@@ -112,6 +116,7 @@ export async function answerAboutVacancy(
       },
     ],
   });
+  await logTokenUsage("ask_about_vacancy", CHAT_MODEL, resp.usage, userId);
   return resp.choices[0].message.content?.trim() || "Не вдалось сформувати відповідь.";
 }
 
@@ -127,6 +132,7 @@ export async function filterRelevantVacancies(
   resumeText: string,
   candidates: VacancyResult[],
   maxResults = 15,
+  userId?: string | null,
 ): Promise<VacancyResult[]> {
   if (!candidates.length) return [];
 
@@ -163,6 +169,7 @@ export async function filterRelevantVacancies(
       },
     ],
   });
+  await logTokenUsage("relevance_filter", CHAT_MODEL, resp.usage, userId);
 
   const raw = resp.choices[0].message.content || "{}";
   let data: any;
@@ -180,7 +187,10 @@ export async function filterRelevantVacancies(
   return ranked.slice(0, maxResults);
 }
 
-export async function getResumeImprovementTips(resumeText: string): Promise<string[]> {
+export async function getResumeImprovementTips(
+  resumeText: string,
+  userId?: string | null,
+): Promise<string[]> {
   const openai = getOpenAI();
   const resp = await openai.chat.completions.create({
     model: CHAT_MODEL,
@@ -197,6 +207,7 @@ export async function getResumeImprovementTips(resumeText: string): Promise<stri
       { role: "user", content: resumeText.slice(0, 12000) },
     ],
   });
+  await logTokenUsage("resume_tips", CHAT_MODEL, resp.usage, userId);
   const raw = resp.choices[0].message.content || "{}";
   const data = JSON.parse(raw);
   return Array.isArray(data.tips) ? data.tips.map((t: unknown) => String(t).trim()) : [];

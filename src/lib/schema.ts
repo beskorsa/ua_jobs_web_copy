@@ -188,5 +188,25 @@ export async function ensureSchema(): Promise<void> {
     "create index if not exists idx_keyword_assoc_lookup on keyword_associations (lower(include_term), weight desc);",
   );
 
+  // Лічильник витрат токенів OpenAI (див. src/lib/tokenUsage.ts) — один
+  // рядок на кожен виклик embeddings/chat.completions, з "kind" (типом
+  // запиту: пошук, чат, cover letter тощо), щоб бачити не тільки скільки
+  // токенів пішло всього, а й НА ЩО саме — це основа і для сторінки
+  // /admin/tokens зараз, і для майбутньої системи оптимізації токенів.
+  await query(`
+    create table if not exists token_usage (
+      id                 bigint generated always as identity primary key,
+      kind               text not null,
+      model              text not null,
+      prompt_tokens      int not null default 0,
+      completion_tokens  int not null default 0,
+      total_tokens       int not null default 0,
+      user_id            uuid references web_users(id) on delete set null,
+      created_at         timestamptz not null default now()
+    );
+  `);
+  await query("create index if not exists idx_token_usage_kind_created on token_usage (kind, created_at);");
+  await query("create index if not exists idx_token_usage_created on token_usage (created_at);");
+
   ensured = true;
 }

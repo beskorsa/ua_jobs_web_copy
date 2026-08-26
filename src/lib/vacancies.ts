@@ -52,21 +52,32 @@ export type Vacancy = {
 // не потрапив у вибірку.
 const INNER_POOL_MULTIPLIER = 4;
 
+// learnedExcludeTerms — м'який сигнал від самонавчальної системи (див.
+// suggestLearnedExclusions у keywords.ts): терміни, які інші користувачі
+// історично додавали як мінус-слова разом з тими самими ключовими словами.
+// На відміну від excludeTerms (жорсткий фільтр, введений САМИМ користувачем
+// у цьому пошуку), тут вакансія НЕ відсіюється — лише отримує штраф до
+// distance за кожен збіг, тобто опускається нижче у видачі. Так вакансія
+// не зникає повністю через непідтверджений сигнал, але релевантність
+// пошуку з часом підлаштовується під те, чого реально уникають користувачі.
+const LEARNED_EXCLUDE_PENALTY = 0.05;
+
 export async function semanticSearch(
   queryEmbedding: number[],
   topK = 10,
   excludeTerms: string[] = [],
+  learnedExcludeTerms: string[] = [],
 ): Promise<VacancyResult[]> {
+  // Обидва масиви завжди передаються як параметри (навіть порожні) — так
+  // номери $-плейсхолдерів фіксовані незалежно від вмісту, і немає шансу
+  // знову зсунути нумерацію умовним push (як сталось із попереднім
+  // варіантом цієї функції). unnest('{}') дає 0 рядків — і NOT EXISTS з
+  // порожнім excludeTerms, і штраф з порожнім learnedExcludeTerms коректно
+  // не впливають на результат.
   const cleanExcludes = excludeTerms.map((t) => t.trim()).filter(Boolean);
-  const excludeClause = cleanExcludes.length
-    ? `and not exists (
-         select 1 from unnest($3::text[]) as ex(term)
-         where v.title ilike '%' || ex.term || '%' or v.description ilike '%' || ex.term || '%'
-       )`
-    : "";
+  const cleanLearned = learnedExcludeTerms.map((t) => t.trim()).filter(Boolean);
   const innerLimit = topK * INNER_POOL_MULTIPLIER;
-  const params: unknown[] = [vecToPg(queryEmbedding), topK, innerLimit];
-  if (cleanExcludes.length) params.push(cleanExcludes);
+  const params: unknown[] = [vecToPg(queryEmbedding), topK, innerLimit, cleanExcludes, cleanLearned];
 
   const sql = `
     select id, source, title, company, url, published_at, city,
@@ -85,11 +96,19 @@ export async function semanticSearch(
             v.salary_min as salary_min, v.salary_max as salary_max,
             v.salary_currency as salary_currency,
             c.content as matched_chunk,
-            c.embedding <=> $1 as distance
+            (c.embedding <=> $1)
+              + ${LEARNED_EXCLUDE_PENALTY} * (
+                  select count(*) from unnest($5::text[]) as le(term)
+                  where v.title ilike '%' || le.term || '%' or v.description ilike '%' || le.term || '%'
+                )
+              as distance
           from vacancy_chunks c
           join vacancies v on v.id = c.vacancy_id
           where v.is_active = true
-          ${excludeClause}
+            and not exists (
+              select 1 from unnest($4::text[]) as ex(term)
+              where v.title ilike '%' || ex.term || '%' or v.description ilike '%' || ex.term || '%'
+            )
           order by v.id, distance asc
         ) per_vacancy
         order by distance asc

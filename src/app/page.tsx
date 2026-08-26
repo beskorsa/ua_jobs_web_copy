@@ -40,6 +40,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [keywords, setKeywords] = useState<string[]>([]);
   const [minusKeywords, setMinusKeywords] = useState<string[]>([]);
+  const [suggestedMinus, setSuggestedMinus] = useState<string[]>([]);
   const [vacancies, setVacancies] = useState<VacancyCardData[]>([]);
   const [resumeId, setResumeId] = useState<number | null>(null);
   const [resumeSummary, setResumeSummary] = useState<string | null>(null);
@@ -121,6 +122,7 @@ export default function Home() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setVacancies(data.results);
+      setSuggestedMinus(Array.isArray(data.suggestedMinusKeywords) ? data.suggestedMinusKeywords : []);
       const label = minusKeywords.length
         ? `${keywords.join(", ")} (виключити: ${minusKeywords.join(", ")})`
         : keywords.join(", ");
@@ -135,6 +137,14 @@ export default function Home() {
     } finally {
       setSearching(false);
     }
+  }
+
+  // Клік по підказці "можливо, варто виключити" (learnedExclusions з
+  // самонавчальної системи, див. api/search/route.ts) — переносить слово
+  // з підказки в явний мінус-фільтр користувача.
+  function acceptSuggestedMinus(term: string) {
+    setMinusKeywords((m) => (m.some((t) => t.toLowerCase() === term.toLowerCase()) ? m : [...m, term]));
+    setSuggestedMinus((s) => s.filter((t) => t !== term));
   }
 
   async function submitLink(url: string) {
@@ -325,6 +335,22 @@ export default function Home() {
           </button>
         </div>
       </form>
+
+      {suggestedMinus.length > 0 && (
+        <div className="suggested-minus">
+          <span className="suggested-minus__label">Можливо, варто виключити:</span>
+          {suggestedMinus.map((term) => (
+            <button
+              key={term}
+              type="button"
+              className="suggested-minus__chip"
+              onClick={() => acceptSuggestedMinus(term)}
+            >
+              + {term}
+            </button>
+          ))}
+        </div>
+      )}
 
       {started && (
       <section className="chat">

@@ -45,6 +45,81 @@ export async function touchKeyword(term: string, kind: KeywordKind): Promise<voi
   );
 }
 
+// Самонавчальна система релевантності: коли користувач в одному пошуку
+// вказує і ключові, і мінус-слова, — це реальний сигнал "хто шукає X,
+// той часто НЕ хоче Y" (наприклад, "python" + мінус "django" — шукає щось
+// не веб-бекендне на python). Кожна пара (include, exclude) накопичує вагу
+// в keyword_associations; чим частіше пара зустрічається в реальних
+// пошуках різних користувачів, тим сильніший сигнал. Викликається з
+// /api/search на кожен реальний пошук (не на кожне натискання клавіші) —
+// база "навчається" безперервно, без окремого перенавчання.
+export async function recordKeywordAssociations(
+  includeTerms: string[],
+  excludeTerms: string[],
+): Promise<void> {
+  const inc = includeTerms.map((t) => t.trim()).filter(Boolean);
+  const exc = excludeTerms.map((t) => t.trim()).filter(Boolean);
+  if (!inc.length || !exc.length) return;
+
+  const pairs: Array<[string, string]> = [];
+  for (const i of inc) {
+    for (const e of exc) {
+      if (i.toLowerCase() === e.toLowerCase()) continue; // те саме слово і в +, і в - — шуму не додаємо
+      pairs.push([i, e]);
+    }
+  }
+  await Promise.all(
+    pairs.map(([includeTerm, excludeTerm]) =>
+      query(
+        `insert into keyword_associations (include_term, exclude_term, weight)
+         values ($1, $2, 1)
+         on conflict (lower(include_term), lower(exclude_term)) do update set
+           weight = keyword_associations.weight + 1,
+           updated_at = now()`,
+        [includeTerm, excludeTerm],
+      ),
+    ),
+  );
+}
+
+// Для поточних ключових слів пошуку — які мінус-слова історично найчастіше
+// додавали разом з ними інші користувачі (а цей користувач ще не додав).
+// Використовується двояко (див. api/search/route.ts): (1) як м'яка
+// пенальті в ранжуванні semanticSearch — вакансії з цими термінами не
+// відсіюються повністю, а лише опускаються нижче; (2) повертається на
+// фронт як підказка "можливо, варто виключити" — користувач сам вирішує,
+// додавати її в явний мінус-фільтр чи ні.
+export async function suggestLearnedExclusions(
+  includeTerms: string[],
+  alreadyExcluded: string[],
+  limit = 5,
+): Promise<string[]> {
+  const inc = includeTerms.map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (!inc.length) return [];
+  const excludedLower = new Set(alreadyExcluded.map((t) => t.trim().toLowerCase()).filter(Boolean));
+
+  const rows = await query<{ exclude_term: string; total_weight: string }>(
+    `select exclude_term, sum(weight)::int as total_weight
+     from keyword_associations
+     where lower(include_term) = any($1::text[])
+     group by exclude_term
+     order by total_weight desc
+     limit $2`,
+    [inc, limit + excludedLower.size + 5],
+  );
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const row of rows) {
+    const key = row.exclude_term.toLowerCase();
+    if (excludedLower.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(row.exclude_term);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
 let seeded = false;
 
 // Одноразове (в межах життя процесу) заповнення словника реальними

@@ -165,5 +165,28 @@ export async function ensureSchema(): Promise<void> {
     "create index if not exists idx_search_keywords_prefix on search_keywords (kind, usage_count desc);",
   );
 
+  // Самонавчальна система релевантності (див. src/lib/keywords.ts:
+  // recordKeywordAssociations/suggestLearnedExclusions). Кожен реальний
+  // пошук, де користувач ввів і ключові, і мінус-слова одночасно, — це
+  // сигнал "хто шукає X — часто НЕ хоче Y". weight росте з кожним повторним
+  // збігом пари (include_term, exclude_term), тож найчастіші асоціації
+  // спливають нагору органічно, без окремого перенавчання/батч-джобу —
+  // база "навчається" на кожному запиті.
+  await query(`
+    create table if not exists keyword_associations (
+      id            bigint generated always as identity primary key,
+      include_term  text not null,
+      exclude_term  text not null,
+      weight        int not null default 1,
+      updated_at    timestamptz not null default now()
+    );
+  `);
+  await query(
+    "create unique index if not exists idx_keyword_assoc_uniq on keyword_associations (lower(include_term), lower(exclude_term));",
+  );
+  await query(
+    "create index if not exists idx_keyword_assoc_lookup on keyword_associations (lower(include_term), weight desc);",
+  );
+
   ensured = true;
 }

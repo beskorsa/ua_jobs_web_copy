@@ -682,6 +682,37 @@ button:disabled {
   color: var(--accent);
 }
 
+/* --- learned-exclusion suggestions (self-learning ранжування) --- */
+
+.suggested-minus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: -12px;
+}
+
+.suggested-minus__label {
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+.suggested-minus__chip {
+  background: transparent;
+  border: 1px dashed var(--border-hover);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.suggested-minus__chip:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(242, 119, 122, 0.08);
+}
+
 .rate-limit-note {
   color: var(--danger);
   background: rgba(242, 119, 122, 0.1);

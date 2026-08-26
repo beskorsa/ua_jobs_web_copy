@@ -334,7 +334,7 @@ export default function Home() {
         />
         <TagInput
           kind="exclude"
-          label="Мінус-слова"
+          label="Виключення"
           placeholder="стажування, php…"
           tags={minusKeywords}
           onChange={setMinusKeywords}

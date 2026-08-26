@@ -40,7 +40,7 @@ export function TagInput({ kind, label, placeholder, tags, onChange, disabled }:
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/keywords?kind=${kind}&q=${encodeURIComponent(q)}`);
+        const res = await fetch(`/api/keywords?kind=${kind}&q=${encodeURIComponent(q)}&limit=6`);
         const data = await res.json();
         setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
       } catch {
@@ -130,6 +130,10 @@ export function TagInput({ kind, label, placeholder, tags, onChange, disabled }:
           value={text}
           placeholder={tags.length ? "" : placeholder}
           disabled={disabled}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => {

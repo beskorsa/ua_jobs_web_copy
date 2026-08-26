@@ -631,8 +631,6 @@ button:disabled {
   border: 1px solid var(--border-hover);
   border-radius: var(--radius-sm);
   box-shadow: 0 16px 32px -16px rgba(0, 0, 0, 0.6);
-  max-height: 220px;
-  overflow-y: auto;
 }
 
 .tag-input__dropdown li {

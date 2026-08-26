@@ -17,11 +17,12 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const kind = parseKind(searchParams.get("kind"));
     const q = searchParams.get("q") ?? "";
+    const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 6, 1), 20);
     if (!kind) {
       return NextResponse.json({ error: "kind має бути 'include' або 'exclude'" }, { status: 400 });
     }
 
-    const suggestions = await suggestKeywords(q, kind, 8);
+    const suggestions = await suggestKeywords(q, kind, limit);
     return NextResponse.json({ suggestions });
   } catch (e: any) {
     console.error("[api/keywords GET]", e);

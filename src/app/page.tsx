@@ -329,35 +329,44 @@ export default function Home() {
       {started && (
       <section className="chat">
         <div className="chat__messages">
-          {messages.map((m, i) => (
-            <div
-              key={i}
-              className={`chat__bubble chat__bubble--${m.role}`}
-            >
-              {m.isError ? <p className="rate-limit-note">{m.content}</p> : <p>{m.content}</p>}
-              {m.vacancies && <VacancyList vacancies={m.vacancies} />}
-              {m.coverLetter && (
-                <div className="cover-letter">
-                  <span className="cover-letter__score">
-                    {m.coverLetter.vacancyTitle} · {m.coverLetter.relevance}/10
-                  </span>
-                  <p>{m.coverLetter.reasoning}</p>
-                  <ol>
-                    {m.coverLetter.coverLetterSentences.map((s, j) => (
-                      <li key={j}>{s}</li>
+          {(() => {
+            // Розгорнутим за замовчуванням лишаємо тільки останнє
+            // повідомлення з вакансіями — інакше кожен новий пошук додає ще
+            // одну повну сітку карток і чат стає незручним для прокрутки.
+            let lastVacancyIdx = -1;
+            messages.forEach((m, i) => {
+              if (m.vacancies?.length) lastVacancyIdx = i;
+            });
+            return messages.map((m, i) => (
+              <div
+                key={i}
+                className={`chat__bubble chat__bubble--${m.role}`}
+              >
+                {m.isError ? <p className="rate-limit-note">{m.content}</p> : <p>{m.content}</p>}
+                {m.vacancies && <VacancyList vacancies={m.vacancies} defaultOpen={i === lastVacancyIdx} />}
+                {m.coverLetter && (
+                  <div className="cover-letter">
+                    <span className="cover-letter__score">
+                      {m.coverLetter.vacancyTitle} · {m.coverLetter.relevance}/10
+                    </span>
+                    <p>{m.coverLetter.reasoning}</p>
+                    <ol>
+                      {m.coverLetter.coverLetterSentences.map((s, j) => (
+                        <li key={j}>{s}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                {m.tips && (
+                  <ul className="tips">
+                    {m.tips.map((t, j) => (
+                      <li key={j}>{t}</li>
                     ))}
-                  </ol>
-                </div>
-              )}
-              {m.tips && (
-                <ul className="tips">
-                  {m.tips.map((t, j) => (
-                    <li key={j}>{t}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
+                  </ul>
+                )}
+              </div>
+            ));
+          })()}
           {chatBusy && <TypingBubble />}
         </div>
         <form onSubmit={handleChatSend} className="chat__input">

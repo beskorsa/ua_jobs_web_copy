@@ -20,7 +20,7 @@ export type RateLimitResult = { allowed: true } | { allowed: false; retryAfterSe
 // Application → Cookies → uid). Це не секрет (просто випадковий UUID без
 // прав), тому зберігати його прямо в коді нормально.
 const RATE_LIMIT_BYPASS_USER_IDS = new Set<string>([
-  // "сюда-вставить-uid",
+  "7f4da38d-ecfc-4049-bb5c-695c69c829af",
 ]);
 
 export async function checkRateLimit(

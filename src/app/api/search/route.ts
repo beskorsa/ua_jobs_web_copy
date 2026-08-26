@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
 
     const limit = await checkRateLimit(userId, "search", 20, 600); // 20 пошуків / 10 хв
     if (!limit.allowed) {
-      return NextResponse.json(rateLimitResponseBody(limit.retryAfterSeconds), { status: 429 });
+      return NextResponse.json(rateLimitResponseBody(limit.retryAfterSeconds, "пошукових запитів"), { status: 429 });
     }
 
     const body = await req.json().catch(() => ({}));

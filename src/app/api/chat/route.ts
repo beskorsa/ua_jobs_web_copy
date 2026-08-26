@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
 
     const limit = await checkRateLimit(userId, "chat", 20, 600); // 20 повідомлень / 10 хв
     if (!limit.allowed) {
-      return NextResponse.json(rateLimitResponseBody(limit.retryAfterSeconds), { status: 429 });
+      return NextResponse.json(rateLimitResponseBody(limit.retryAfterSeconds, "повідомлень у чаті"), { status: 429 });
     }
 
     const body = await req.json();
@@ -229,7 +229,7 @@ export async function POST(req: NextRequest) {
         const url = String(args.url || "").trim();
         const linkLimit = await checkRateLimit(userId, "vacancy_link", 10, 3600); // 10 посилань / год — важче за пошук
         if (!linkLimit.allowed) {
-          reply = rateLimitResponseBody(linkLimit.retryAfterSeconds).error;
+          reply = rateLimitResponseBody(linkLimit.retryAfterSeconds, "аналіз вакансій за посиланням").error;
         } else if (!url) {
           reply = "Не бачу посилання — надішліть URL вакансії.";
         } else {
@@ -270,7 +270,7 @@ export async function POST(req: NextRequest) {
         const title = String(args.title || "").trim() || "Вакансія (вставлений текст)";
         const linkLimit = await checkRateLimit(userId, "vacancy_link", 10, 3600); // той самий бакет, що й лінки
         if (!linkLimit.allowed) {
-          reply = rateLimitResponseBody(linkLimit.retryAfterSeconds).error;
+          reply = rateLimitResponseBody(linkLimit.retryAfterSeconds, "аналіз вакансій за посиланням").error;
         } else if (text.length < 50) {
           reply = "Текст вакансії закороткий — вставте повний опис.";
         } else {

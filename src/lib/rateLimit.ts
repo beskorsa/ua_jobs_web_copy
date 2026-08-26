@@ -13,12 +13,26 @@ import { query } from "./db";
  */
 export type RateLimitResult = { allowed: true } | { allowed: false; retryAfterSeconds: number };
 
+// Персональный обхід лімітів для власного тестування (Ліза) — без нього
+// кожен ручний тест (аплоад резюме, повторні запити в чат) з'їдає той самий
+// бюджет, що і в реальних користувачів, і швидко впирається в 429.
+// Значення — anonymous uid з httpOnly-cookie (див. lib/user.ts, DevTools →
+// Application → Cookies → uid). Це не секрет (просто випадковий UUID без
+// прав), тому зберігати його прямо в коді нормально.
+const RATE_LIMIT_BYPASS_USER_IDS = new Set<string>([
+  // "сюда-вставить-uid",
+]);
+
 export async function checkRateLimit(
   userId: string,
   bucket: string,
   limit: number,
   windowSeconds: number,
 ): Promise<RateLimitResult> {
+  if (RATE_LIMIT_BYPASS_USER_IDS.has(userId)) {
+    return { allowed: true };
+  }
+
   const rows = await query<{ count: string; oldest: string | null }>(
     `select count(*)::int as count, min(created_at) as oldest
      from rate_limit_hits
@@ -46,12 +60,13 @@ export async function checkRateLimit(
   return { allowed: true };
 }
 
-export function rateLimitResponseBody(retryAfterSeconds: number) {
+export function rateLimitResponseBody(retryAfterSeconds: number, subject?: string) {
   const minutes = Math.ceil(retryAfterSeconds / 60);
+  const what = subject ? `ліміт (${subject})` : "ліміт запитів";
   return {
     error:
       minutes <= 1
-        ? "Забагато запитів — спробуйте ще раз за хвилину."
-        : `Забагато запитів — спробуйте ще раз через ${minutes} хв.`,
+        ? `Ви вичерпали ${what} — спробуйте ще раз за хвилину.`
+        : `Ви вичерпали ${what} — спробуйте ще раз через ${minutes} хв.`,
   };
 }

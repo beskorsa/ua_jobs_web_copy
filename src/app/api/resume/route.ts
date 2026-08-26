@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
 
     const limit = await checkRateLimit(userId, "resume", 5, 3600); // 5 завантажень / год
     if (!limit.allowed) {
-      return NextResponse.json(rateLimitResponseBody(limit.retryAfterSeconds), { status: 429 });
+      return NextResponse.json(rateLimitResponseBody(limit.retryAfterSeconds, "завантаження резюме"), { status: 429 });
     }
 
     const form = await req.formData();

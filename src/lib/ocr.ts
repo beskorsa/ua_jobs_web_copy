@@ -8,9 +8,19 @@ import { createWorker } from "tesseract.js";
 // поза браузером, без DOM).
 const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { getDocument } = require("pdfjs-dist/legacy/build/pdf.js");
+const { getDocument, GlobalWorkerOptions } = require("pdfjs-dist/legacy/build/pdf.js");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { createCanvas } = require("canvas");
+
+// Без явного workerSrc pdf.js у Node намагається зробити
+// `eval("require")("./pdf.worker.js")` (відносний шлях), що ламається
+// всередині serverless-бандла Vercel ("Setting up fake worker failed:
+// Cannot find module './pdf.worker.js'") — файл фізично лежить поруч у
+// node_modules, але relative require з середини самого пакету туди не
+// резолвиться після трасування файлів Next.js. require.resolve з нашого
+// коду — статичний виклик, який nft/webpack точно підхоплюють і кладуть
+// файл у бандл, тому явно вказуємо абсолютний шлях.
+GlobalWorkerOptions.workerSrc = require.resolve("pdfjs-dist/legacy/build/pdf.worker.js");
 
 // Мовні дані лежать прямо в репозиторії (tessdata/*.traineddata.gz), а не
 // тягнуться з jsdelivr CDN у рантаймі: на serverless (Vercel) зовнішній CDN —

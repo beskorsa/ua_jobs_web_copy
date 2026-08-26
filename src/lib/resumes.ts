@@ -6,6 +6,7 @@ import { embedAsSingleVector } from "./chunk";
 import { vecToPg, pgToVec } from "./vector";
 import { semanticSearch, type VacancyResult } from "./vacancies";
 import { extractTextViaOcr } from "./ocr";
+import { filterRelevantVacancies } from "./generate";
 
 export type ResumeFileType = "pdf" | "docx";
 
@@ -115,7 +116,11 @@ export async function storeResumeEmbedding(resumeId: number, text: string): Prom
   );
 }
 
-export async function matchVacanciesForResume(resumeId: number, topK = 10): Promise<VacancyResult[]> {
+export async function matchVacanciesForResume(
+  resumeId: number,
+  resumeText: string,
+  topK = 15,
+): Promise<VacancyResult[]> {
   const rows = await query<{ embedding: string }>(
     `select embedding from resume_sections where resume_id = $1 and section = 'full'`,
     [resumeId],
@@ -124,5 +129,10 @@ export async function matchVacanciesForResume(resumeId: number, topK = 10): Prom
     throw new Error(`У резюме id=${resumeId} нет эмбеддинга — сначала storeResumeEmbedding()`);
   }
   const vec = pgToVec(rows[0].embedding);
-  return semanticSearch(vec, topK);
+  // Ширший пул кандидатів за векторною відстанню, ніж фінальна кількість —
+  // щоб LLM-фільтру (filterRelevantVacancies) було з чого реально обирати,
+  // а не просто підтверджувати перші topK.
+  const poolSize = Math.max(topK * 3, 40);
+  const candidates = await semanticSearch(vec, poolSize);
+  return filterRelevantVacancies(resumeText, candidates, topK);
 }

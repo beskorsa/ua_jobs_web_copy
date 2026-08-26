@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
 
     const [summary, results] = await Promise.all([
       summarizeResume(text),
-      matchVacanciesForResume(resumeId, 30),
+      matchVacanciesForResume(resumeId, text, 15),
     ]);
 
     await logSearchQuery(userId, "resume", summary, results.length);

@@ -1,6 +1,6 @@
 import { getOpenAI, CHAT_MODEL } from "./openai";
 import { query } from "./db";
-import type { Vacancy } from "./vacancies";
+import type { Vacancy, VacancyResult } from "./vacancies";
 
 // Тот же промпт, что в ua_jobs_parser/generate.py (SYSTEM_PROMPT) — держим
 // в синхроне вручную: логика одна и та же (grounding на резюме+вакансии),
@@ -113,6 +113,71 @@ export async function answerAboutVacancy(
     ],
   });
   return resp.choices[0].message.content?.trim() || "Не вдалось сформувати відповідь.";
+}
+
+// Векторний пошук (semanticSearch у vacancies.ts) знаходить N найближчих за
+// cosine distance, БЕЗ жодного порогу релевантності — тому завжди повертає
+// рівно topK записів, навіть якщо реально влучних менше, а решту місць
+// займають слабкі збіги (наприклад, PHP Developer для Python/LLM-резюме —
+// vector search ловить збіг за загальними словами "розробник", "API",
+// "команда" тощо, хоча стек геть інший). Це другий прохід — LLM дивиться на
+// повний текст резюме і список кандидатів та відкидає ті, що не підходять
+// за стеком/рівнем/доменом, а не просто найближчі за embedding-відстанню.
+export async function filterRelevantVacancies(
+  resumeText: string,
+  candidates: VacancyResult[],
+  maxResults = 15,
+): Promise<VacancyResult[]> {
+  if (!candidates.length) return [];
+
+  const openai = getOpenAI();
+  const listing = candidates
+    .map(
+      (c) =>
+        `id=${c.id} | ${c.title}${c.company ? ` — ${c.company}` : ""}\n` +
+        `${c.matched_chunk.slice(0, 300).trim()}`,
+    )
+    .join("\n\n");
+
+  const resp = await openai.chat.completions.create({
+    model: CHAT_MODEL,
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "Ти — асистент з підбору вакансій. Тобі дають резюме кандидата і список вакансій-кандидатів, " +
+          "знайдених семантичним (векторним) пошуком — серед них трапляються слабо релевантні: інший " +
+          "стек технологій, інший рівень позиції (junior/senior) чи зовсім інший домен, які потрапили " +
+          "в список лише через збіг загальних слів. Твоя задача — залишити ТІЛЬКИ ті вакансії, які " +
+          "дійсно підходять кандидату за стеком технологій, рівнем позиції та доменом, судячи з тексту " +
+          "резюме. Не бійся відкинути більшість — краще показати кілька влучних вакансій, ніж багато " +
+          "випадкових.\n\n" +
+          'Відповідай ЛИШЕ JSON {"relevant_ids": [id, id, ...]} — id вакансій, які варто показати, ' +
+          "у порядку спадання релевантності (найкраща перша). Якщо жодна не підходить — порожній масив.",
+      },
+      {
+        role: "user",
+        content: `### Резюме кандидата\n${resumeText.slice(0, 6000)}\n\n### Вакансії-кандидати\n${listing}`,
+      },
+    ],
+  });
+
+  const raw = resp.choices[0].message.content || "{}";
+  let data: any;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    // LLM повернула не-JSON — не ламаємо пошук, показуємо як є (перші за
+    // векторною відстанню), просто без додаткового відсіву.
+    return candidates.slice(0, maxResults);
+  }
+
+  const ids: number[] = Array.isArray(data.relevant_ids) ? data.relevant_ids.map((x: unknown) => Number(x)) : [];
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const ranked = ids.map((id) => byId.get(id)).filter((c): c is VacancyResult => Boolean(c));
+  return ranked.slice(0, maxResults);
 }
 
 export async function getResumeImprovementTips(resumeText: string): Promise<string[]> {

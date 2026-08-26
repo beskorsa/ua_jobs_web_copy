@@ -25,16 +25,6 @@ const INTRO =
   "для аналізу, або завантажте резюме (PDF) — підберу вакансії під нього. Після цього тут " +
   "з'явиться чат: можна буде попросити cover letter, поради по резюме або запитати про вакансію.";
 
-function SkeletonGrid({ count = 6 }: { count?: number }) {
-  return (
-    <div className="skeleton-grid" aria-hidden="true">
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="skeleton-card" style={{ "--i": i } as React.CSSProperties} />
-      ))}
-    </div>
-  );
-}
-
 function TypingBubble() {
   return (
     <div className="chat__bubble chat__bubble--assistant chat__bubble--typing" aria-label="Асистент друкує">
@@ -275,8 +265,6 @@ export default function Home() {
           />
         </label>
       </section>
-
-      {searching || uploading ? <SkeletonGrid /> : <VacancyList vacancies={vacancies} />}
 
       {started && (
       <section className="chat">

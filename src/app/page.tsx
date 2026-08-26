@@ -239,7 +239,7 @@ export default function Home() {
     <main className="page">
       <header className="page__header">
         <span className="page__kicker">AI-пошук роботи</span>
-        <h1>Пошук вакансій з AI</h1>
+        <h1>Знайди роботу швидше</h1>
         <p>
           Введіть ключові слова, вставте посилання на вакансію або завантажте резюме — покажу релевантні
           вакансії, напишу cover letter і дам поради.

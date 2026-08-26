@@ -64,6 +64,12 @@ export default function Home() {
   function pushError(err: unknown) {
     const text = err instanceof Error ? err.message : String(err);
     setMessages((m) => [...m, { role: "assistant", content: text, isError: true }]);
+    // Без цього: якщо перша ж дія користувача (аплоад/пошук/лінк) завершується
+    // помилкою, чат-панель (яка рендериться лише за started === true, а
+    // started виставлявся в true тільки при УСПІХУ) так і не з'являється —
+    // повідомлення лежить у messages, але його ніде не видно. Саме це малося
+    // на увазі під "PDF перестав оброблятися / повідомлення так і нема".
+    setStarted(true);
   }
 
   // Якщо в полі пошуку посилання — це не ключові слова, а вакансія для

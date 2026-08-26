@@ -260,7 +260,7 @@ export default function Home() {
           <textarea
             className="search-form__input"
             rows={2}
-            placeholder="Посилання на вакансію (work.ua, robota.ua, djinni…)"
+            placeholder="Лінк на вакансію (work.ua, robota.ua, djinni…)"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {

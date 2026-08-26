@@ -121,6 +121,7 @@ a {
   width: var(--field-width);
   height: 56px;
   resize: none;
+  overflow-y: hidden;
   line-height: 1.35;
 }
 
@@ -650,7 +651,9 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
-  min-height: 44px;
+  /* Та сама висота, що й у поля посилання (search-form__input: 56px) —
+     щоб усі три поля вводу були однакового розміру й на одному рівні. */
+  min-height: 56px;
   transition: border-color 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
 }
 

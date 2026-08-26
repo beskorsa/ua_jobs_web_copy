@@ -90,19 +90,22 @@ a {
 
 .controls {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
 }
 
 .search-form {
   display: flex;
   gap: 8px;
-  flex: 1;
-  min-width: 280px;
 }
 
 .search-form input {
   flex: 1;
+}
+
+.controls .upload-button {
+  align-self: flex-start;
 }
 
 input[type="text"] {
@@ -141,6 +144,19 @@ button {
 
 button:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+
+/* Головні сині CTA-кнопки ("Знайти" і "Пошук за тегами") — однакова висота
+   й мінімальна ширина, щоб вони виглядали парою, а не випадково зібраними
+   різнорозмірними кнопками на різних рядках/формах. */
+.btn-primary {
+  height: 44px;
+  min-width: 148px;
+  padding: 0 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 @media (hover: hover) and (pointer: fine) {

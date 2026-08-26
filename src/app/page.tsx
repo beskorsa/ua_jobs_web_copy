@@ -276,7 +276,7 @@ export default function Home() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <button type="submit" disabled={busy || !query.trim()}>
+          <button type="submit" className="btn-primary" disabled={busy || !query.trim()}>
             {searching ? (isUrl ? "Аналізую…" : "Шукаю…") : isUrl ? "Аналізувати" : "Знайти"}
           </button>
         </form>
@@ -330,7 +330,7 @@ export default function Home() {
           disabled={busy}
         />
         <div className="keyword-panel__submit">
-          <button type="submit" disabled={busy || !keywords.length}>
+          <button type="submit" className="btn-primary" disabled={busy || !keywords.length}>
             {searching ? "Шукаю…" : "Пошук за тегами"}
           </button>
         </div>

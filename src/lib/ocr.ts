@@ -39,14 +39,15 @@ const TESSDATA_PATH = path.join(process.cwd(), "tessdata");
 const MAX_OCR_PAGES = 5; // захист від величезних PDF і таймауту serverless-функції
 const RENDER_SCALE = 2; // вищий scale = краща якість OCR, але повільніше
 
-/**
- * Фоллбек для PDF без текстового шару — наприклад, резюме, збережене через
- * браузерний "Друк у PDF" (Microsoft Print to PDF), де текст перетворюється
- * на контури/картинку і pdf-parse нічого не витягує (див. lib/resumes.ts).
- * Рендеримо кожну сторінку в растрове зображення і розпізнаємо текст через
- * tesseract.js (укр+англ).
- */
-export async function extractTextViaOcr(buffer: Buffer): Promise<string> {
+// Жорсткий дедлайн для всього OCR-фоллбеку. maxDuration функції — 60с
+// (api/resume/route.ts); якщо OCR десь зависне (наприклад, знову зламане
+// завантаження wasm-ядра tesseract), краще самим впасти з зрозумілою
+// помилкою за 45с, ніж дати Vercel вбити всю функцію по Runtime Timeout —
+// у такому разі клієнт замість JSON отримує голу HTML/текстову сторінку
+// платформи і падає на "Unexpected token... is not valid JSON".
+const OCR_TIMEOUT_MS = 45_000;
+
+async function extractTextViaOcrInner(buffer: Buffer): Promise<string> {
   const pdf = await getDocument({ data: new Uint8Array(buffer) }).promise;
   const numPages = Math.min(pdf.numPages, MAX_OCR_PAGES);
 
@@ -72,5 +73,27 @@ export async function extractTextViaOcr(buffer: Buffer): Promise<string> {
     return fullText;
   } finally {
     await worker.terminate();
+  }
+}
+
+/**
+ * Фоллбек для PDF без текстового шару — наприклад, резюме, збережене через
+ * браузерний "Друк у PDF" (Microsoft Print to PDF), де текст перетворюється
+ * на контури/картинку і pdf-parse нічого не витягує (див. lib/resumes.ts).
+ * Рендеримо кожну сторінку в растрове зображення і розпізнаємо текст через
+ * tesseract.js (укр+англ).
+ */
+export async function extractTextViaOcr(buffer: Buffer): Promise<string> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<string>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error(`OCR timed out after ${OCR_TIMEOUT_MS}ms`)),
+      OCR_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([extractTextViaOcrInner(buffer), timeout]);
+  } finally {
+    clearTimeout(timeoutId!);
   }
 }

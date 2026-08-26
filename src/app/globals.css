@@ -162,8 +162,12 @@ button:hover:not(:disabled) {
    різнорозмірними кнопками на різних рядках/формах. */
 .btn-primary {
   height: 44px;
-  min-width: 148px;
-  padding: 0 20px;
+  /* Фіксована (не мінімальна) ширина — інакше довший текст "Пошук за
+     тегами" розтягує кнопку понад коротший "Знайти", і пара виглядає
+     різнорозмірною попри спільний клас. */
+  width: 200px;
+  flex: 0 0 auto;
+  padding: 0 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -184,17 +188,28 @@ button:disabled {
 .upload-button {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   background: var(--surface);
   border: 1px dashed var(--border-hover);
   border-radius: var(--radius-sm);
   color: var(--text-dim);
-  padding: 12px 16px;
-  font-size: 14px;
+  padding: 6px 12px;
+  font-size: 11.5px;
   font-weight: 600;
+  line-height: 1.35;
   cursor: pointer;
-  white-space: nowrap;
   transition: border-color 160ms var(--ease-out), color 160ms var(--ease-out), transform 140ms var(--ease-out);
+}
+
+.upload-button__text {
+  display: flex;
+  flex-direction: column;
+}
+
+.upload-button__ext {
+  font-size: 10.5px;
+  font-weight: 500;
+  opacity: 0.75;
 }
 
 .upload-button:hover {

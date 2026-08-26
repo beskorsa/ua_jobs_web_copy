@@ -66,43 +66,21 @@ export default function Home() {
     setStarted(true);
   }
 
-  // Якщо в полі пошуку посилання — це не ключові слова, а вакансія для
-  // розбору: маршрутизуємо через /api/chat (analyze_vacancy_link), а не
-  // /api/search. Головне поле пошуку — тепер єдина точка входу і для
-  // ключових слів, і для лінків, бо чат-панель з'являється лише після
-  // першої дії.
+  // Це поле — тепер тільки для посилання на конкретну вакансію (розбір
+  // через /api/chat: analyze_vacancy_link). Пошук за ключовими словами
+  // переїхав у окремий блок тег-інпутів нижче (keywords/minusKeywords,
+  // handleKeywordSearch) — тут вільний текст більше не приймається.
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
     const q = query.trim();
     if (!q || busy) return;
 
-    if (isUrl) {
-      await submitLink(q);
+    if (!isUrl) {
+      pushError(new Error("Це поле — тільки для посилання на вакансію. Ключові слова введіть нижче."));
       return;
     }
 
-    setSearching(true);
-    try {
-      const res = await fetch("/api/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setVacancies(data.results);
-      setMessages((m) => [
-        ...m,
-        { role: "user", content: q },
-        { role: "assistant", content: `Знайшов ${data.results.length} вакансій.`, vacancies: data.results },
-      ]);
-      setStarted(true);
-      setQuery("");
-    } catch (err) {
-      pushError(err);
-    } finally {
-      setSearching(false);
-    }
+    await submitLink(q);
   }
 
   // Пошук за тегами (ключові / мінус-слова) — окрема від головного поля
@@ -273,7 +251,7 @@ export default function Home() {
           <input
             type="text"
             className="search-form__input"
-            placeholder="Ключові слова (python розробник, віддалено) або посилання на вакансію"
+            placeholder="Посилання на вакансію (work.ua, robota.ua, djinni…)"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -297,7 +275,21 @@ export default function Home() {
                 />
               )}
             </svg>
-            {uploading ? "Завантажую…" : resumeSummary ? "Резюме завантажено (замінити)" : "Завантажити резюме (PDF/DOCX)"}
+            <span className="upload-button__text">
+              {uploading ? (
+                "Завантажую…"
+              ) : resumeSummary ? (
+                <>
+                  Резюме завантажено
+                  <span className="upload-button__ext">(замінити)</span>
+                </>
+              ) : (
+                <>
+                  Завантажити резюме
+                  <span className="upload-button__ext">(PDF/DOCX)</span>
+                </>
+              )}
+            </span>
             <input
               ref={fileInputRef}
               type="file"
@@ -308,7 +300,7 @@ export default function Home() {
             />
           </label>
           <button type="submit" className="btn-primary search-form__submit" disabled={busy || !query.trim()}>
-            {searching ? (isUrl ? "Аналізую…" : "Шукаю…") : isUrl ? "Аналізувати" : "Знайти"}
+            {searching ? "Аналізую…" : "Аналізувати"}
           </button>
         </form>
       </section>

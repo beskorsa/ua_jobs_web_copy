@@ -28,6 +28,23 @@ export async function summarizeResume(text: string): Promise<string> {
   return resp.choices[0].message.content?.trim() || "";
 }
 
+/**
+ * Фоллбек для чата: resumeId там приходит от клиента (React-состояние на
+ * странице) и теряется при перезагрузке страницы или если само завантаження
+ * резюме на этот раз не удалось (например скан PDF без текстового шару —
+ * тоді користувач бачить помилку і resumeId у нього просто немає). Раз
+ * userId — стабильный httpOnly-cookie (см. lib/user.ts), а не React-стан,
+ * можем подхватить последнее УСПІШНО завантажене резюме цього user_id з
+ * бази замість того, щоб щоразу просити завантажити знову.
+ */
+export async function getLatestResumeIdForUser(userId: string): Promise<number | null> {
+  const rows = await query<{ id: number }>(
+    `select id from resumes where user_id = $1 order by uploaded_at desc limit 1`,
+    [userId],
+  );
+  return rows[0]?.id ?? null;
+}
+
 export async function upsertResume(userId: string, filename: string, rawText: string): Promise<number> {
   const rows = await query<{ id: number }>(
     `insert into resumes (filename, raw_text, user_id) values ($1, $2, $3) returning id`,

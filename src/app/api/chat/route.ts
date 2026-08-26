@@ -7,6 +7,7 @@ import { getOrCreateUserId } from "@/lib/user";
 import { getOpenAI, CHAT_MODEL, embedText } from "@/lib/openai";
 import { semanticSearch, getVacancy, getVacancyByUrl, upsertExternalVacancy, upsertVacancyFromText } from "@/lib/vacancies";
 import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy } from "@/lib/generate";
+import { getLatestResumeIdForUser } from "@/lib/resumes";
 import { query } from "@/lib/db";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
 import { logSearchQuery } from "@/lib/searchLog";
@@ -131,8 +132,15 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const message: string = body.message;
-    const resumeId: number | undefined = body.resumeId || undefined;
     const shownVacancies: ShownVacancy[] = Array.isArray(body.shownVacancies) ? body.shownVacancies : [];
+
+    // resumeId от клієнта — це React-стан на сторінці: губиться при
+    // перезавантаженні сторінки і не з'являється, якщо саме завантаження
+    // PDF цього разу не вдалось. userId — стабільний cookie, тож якщо
+    // клієнт не передав resumeId, підхоплюємо останнє успішно завантажене
+    // резюме цього user_id з бази — це і є "пам'ять" між повідомленнями.
+    const resumeId: number | undefined =
+      body.resumeId || (await getLatestResumeIdForUser(userId)) || undefined;
 
     if (!message || !message.trim()) {
       return NextResponse.json({ error: "Порожнє повідомлення" }, { status: 400 });

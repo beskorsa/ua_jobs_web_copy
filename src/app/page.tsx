@@ -272,44 +272,45 @@ export default function Home() {
         <form onSubmit={handleSearch} className="search-form">
           <input
             type="text"
+            className="search-form__input"
             placeholder="Ключові слова (python розробник, віддалено) або посилання на вакансію"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <button type="submit" className="btn-primary" disabled={busy || !query.trim()}>
+          <label className={`upload-button${resumeSummary ? " upload-button--done" : ""}`}>
+            <svg className="upload-button__icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
+              {resumeSummary ? (
+                <path
+                  d="M20 6L9 17l-5-5"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ) : (
+                <path
+                  d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+            </svg>
+            {uploading ? "Завантажую…" : resumeSummary ? "Резюме завантажено (замінити)" : "Завантажити резюме (PDF/DOCX)"}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
+              onChange={handleUpload}
+              hidden
+              disabled={busy}
+            />
+          </label>
+          <button type="submit" className="btn-primary search-form__submit" disabled={busy || !query.trim()}>
             {searching ? (isUrl ? "Аналізую…" : "Шукаю…") : isUrl ? "Аналізувати" : "Знайти"}
           </button>
         </form>
-        <label className={`upload-button${resumeSummary ? " upload-button--done" : ""}`}>
-          <svg className="upload-button__icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
-            {resumeSummary ? (
-              <path
-                d="M20 6L9 17l-5-5"
-                stroke="currentColor"
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            ) : (
-              <path
-                d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            )}
-          </svg>
-          {uploading ? "Завантажую…" : resumeSummary ? "Резюме завантажено (замінити)" : "Завантажити резюме (PDF/DOCX)"}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
-            onChange={handleUpload}
-            hidden
-            disabled={busy}
-          />
-        </label>
       </section>
 
       <form onSubmit={handleKeywordSearch} className="keyword-panel">

@@ -97,15 +97,26 @@ a {
 
 .search-form {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.search-form input {
-  flex: 1;
+.search-form__input {
+  flex: 0 1 340px;
 }
 
-.controls .upload-button {
-  align-self: flex-start;
+.search-form .upload-button {
+  flex: 0 0 auto;
+}
+
+/* "Знайти" притискаємо до правого краю рядка — той самий X, де стоїть
+   "Пошук за тегами" в рядку нижче (там кнопка теж останній/крайній
+   елемент), тож обидві сині кнопки візуально вишиковуються в одну колонку.
+   На вузьких екранах (flex-wrap вище) кнопка просто переходить на свій
+   рядок замість накладання. */
+.search-form__submit {
+  margin-left: auto;
 }
 
 input[type="text"] {
@@ -572,6 +583,7 @@ button:disabled {
 .keyword-panel__submit {
   display: flex;
   align-items: flex-end;
+  justify-content: flex-end;
 }
 
 .tag-input {

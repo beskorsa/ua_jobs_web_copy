@@ -41,6 +41,17 @@ export type Vacancy = {
 // вакансія відсіюється, якщо будь-яке з них зустрічається в назві чи описі
 // (регістронезалежно). Фільтр на рівні SQL, а не постфільтрація в JS —
 // щоб LIMIT рахувався вже після відсіву, а не обрізав видачу до фільтра.
+//
+// Один і той самий job-пост часто скрейпиться з кількох сайтів одразу
+// (work.ua/robota.ua/djinni тощо) — це різні рядки vacancies з різним
+// source/url, але з однаковою назвою+компанією. Тому додатковий шар
+// distinct on (lower(title), lower(company)) відсіює дублікати, лишаючи
+// найрелевантнішу (найближчу за distance) копію. Внутрішній пул беремо з
+// запасом (INNER_POOL_MULTIPLIER), інакше дедуп після LIMIT $2 міг би
+// відсікти вакансії, які виглядали унікальними лише через те, що дублікат
+// не потрапив у вибірку.
+const INNER_POOL_MULTIPLIER = 4;
+
 export async function semanticSearch(
   queryEmbedding: number[],
   topK = 10,
@@ -53,24 +64,39 @@ export async function semanticSearch(
          where v.title ilike '%' || ex.term || '%' or v.description ilike '%' || ex.term || '%'
        )`
     : "";
-  const params: unknown[] = [vecToPg(queryEmbedding), topK];
+  const innerLimit = topK * INNER_POOL_MULTIPLIER;
+  const params: unknown[] = [vecToPg(queryEmbedding), topK, innerLimit];
   if (cleanExcludes.length) params.push(cleanExcludes);
 
   const sql = `
     select id, source, title, company, url, published_at, city,
            salary_min, salary_max, salary_currency, matched_chunk, distance
     from (
-      select distinct on (v.id)
-        v.id, v.source, v.title, v.company, v.url, v.published_at, v.city,
-        v.salary_min, v.salary_max, v.salary_currency,
-        c.content as matched_chunk,
-        c.embedding <=> $1 as distance
-      from vacancy_chunks c
-      join vacancies v on v.id = c.vacancy_id
-      where v.is_active = true
-      ${excludeClause}
-      order by v.id, distance asc
-    ) matched
+      select distinct on (lower(title), coalesce(lower(company), ''))
+        id, source, title, company, url, published_at, city,
+        salary_min, salary_max, salary_currency, matched_chunk, distance
+      from (
+        select id, source, title, company, url, published_at, city,
+               salary_min, salary_max, salary_currency, matched_chunk, distance
+        from (
+          select distinct on (v.id)
+            v.id as id, v.source as source, v.title as title, v.company as company,
+            v.url as url, v.published_at as published_at, v.city as city,
+            v.salary_min as salary_min, v.salary_max as salary_max,
+            v.salary_currency as salary_currency,
+            c.content as matched_chunk,
+            c.embedding <=> $1 as distance
+          from vacancy_chunks c
+          join vacancies v on v.id = c.vacancy_id
+          where v.is_active = true
+          ${excludeClause}
+          order by v.id, distance asc
+        ) per_vacancy
+        order by distance asc
+        limit $3
+      ) pool
+      order by lower(title), coalesce(lower(company), ''), distance asc
+    ) deduped
     order by distance asc
     limit $2
   `;

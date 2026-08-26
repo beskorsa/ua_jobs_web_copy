@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent, type ChangeEvent } from "react";
+import { useRef, useState, type FormEvent, type ChangeEvent, type KeyboardEvent } from "react";
 import { VacancyList } from "@/components/VacancyList";
 import type { VacancyCardData } from "@/components/VacancyCard";
 import { TagInput } from "@/components/TagInput";
@@ -257,12 +257,20 @@ export default function Home() {
           &nbsp;
         </span>
         <form onSubmit={handleSearch} className="search-form">
-          <input
-            type="text"
+          <textarea
             className="search-form__input"
+            rows={2}
             placeholder="Посилання на вакансію (work.ua, robota.ua, djinni…)"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
+              // Enter надсилає форму (як у звичайного текстового інпута),
+              // Shift+Enter — перенос рядка всередині textarea.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
+              }
+            }}
           />
           <label className={`upload-button${resumeSummary ? " upload-button--done" : ""}`}>
             <svg className="upload-button__icon" width="16" height="16" viewBox="0 0 24 24" fill="none">

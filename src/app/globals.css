@@ -108,8 +108,20 @@ a {
   flex-wrap: wrap;
 }
 
+/* Однакова фіксована ширина для ВСІХ полів вводу (посилання / ключові /
+   мінус-слова) — щоб рядки виглядали як єдина вирівняна сітка, а не
+   випадково різнорозмірні блоки. Поле посилання — textarea на 2 рядки:
+   довгий плейсхолдер/URL при такій ширині не влазить в один рядок. */
+:root {
+  --field-width: 260px;
+}
+
 .search-form__input {
-  flex: 0 1 340px;
+  flex: 0 0 var(--field-width);
+  width: var(--field-width);
+  height: 56px;
+  resize: none;
+  line-height: 1.35;
 }
 
 .search-form .upload-button {
@@ -125,7 +137,8 @@ a {
   margin-left: auto;
 }
 
-input[type="text"] {
+input[type="text"],
+.search-form__input {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -136,11 +149,13 @@ input[type="text"] {
   transition: border-color 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
 }
 
-input[type="text"]::placeholder {
+input[type="text"]::placeholder,
+.search-form__input::placeholder {
   color: var(--text-faint);
 }
 
-input[type="text"]:focus {
+input[type="text"]:focus,
+.search-form__input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -596,13 +611,14 @@ button:disabled {
   flex-wrap: wrap;
 }
 
-.keyword-panel > * {
-  flex: 1;
-  min-width: 240px;
+.keyword-panel .tag-input {
+  flex: 0 0 var(--field-width);
+  width: var(--field-width);
 }
 
 .keyword-panel__submit {
   display: flex;
+  flex: 1 1 auto;
   align-items: flex-end;
   justify-content: flex-end;
 }

@@ -247,6 +247,15 @@ export default function Home() {
       </header>
 
       <section className="controls">
+        {/* Невидима підпис-розпірка — щоб поле посилання опустилось на той
+            самий рівень, що й "Ключові слова"/"Мінус-слова" нижче (там над
+            полем реальна підпис, тут її немає, і без розпірки рядки
+            виглядають зі зсувом). Обгортка з тим самим gap:6px, що й у
+            tag-input, — інакше .controls gap:12px додав би зайвий відступ. */}
+        <div className="search-row">
+        <span className="tag-input__label" aria-hidden="true">
+          &nbsp;
+        </span>
         <form onSubmit={handleSearch} className="search-form">
           <input
             type="text"
@@ -303,6 +312,7 @@ export default function Home() {
             {searching ? "Аналізую…" : "Аналізувати"}
           </button>
         </form>
+        </div>
       </section>
 
       <form onSubmit={handleKeywordSearch} className="keyword-panel">

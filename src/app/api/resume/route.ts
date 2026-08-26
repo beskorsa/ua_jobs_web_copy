@@ -1,4 +1,9 @@
 export const runtime = "nodejs";
+// OCR-фоллбек (рендер сторінок + tesseract.js) для PDF без текстового шару
+// може займати 5-15с на кожну сторінку — дефолтні 10с serverless-функції
+// на Vercel цього не вистачить. Потрібен план/конфігурація, де maxDuration
+// підтримується (Hobby з Fluid Compute — до 300с, або Pro).
+export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from "next/server";
 import { ensureSchema } from "@/lib/schema";
@@ -9,6 +14,8 @@ import {
   upsertResume,
   storeResumeEmbedding,
   matchVacanciesForResume,
+  RESUME_MIME_TYPES,
+  resumeFileTypeFromName,
 } from "@/lib/resumes";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
 import { logSearchQuery } from "@/lib/searchLog";
@@ -30,18 +37,23 @@ export async function POST(req: NextRequest) {
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Файл не передано (поле 'file')" }, { status: 400 });
     }
-    if (file.type !== "application/pdf") {
-      return NextResponse.json({ error: "Очікується PDF" }, { status: 400 });
+    const fileType = RESUME_MIME_TYPES[file.type] ?? resumeFileTypeFromName(file.name);
+    if (!fileType) {
+      return NextResponse.json({ error: "Очікується PDF або DOCX" }, { status: 400 });
     }
     if (file.size > MAX_PDF_BYTES) {
       return NextResponse.json({ error: "Файл завеликий (максимум 10 МБ)" }, { status: 413 });
     }
 
     const buf = Buffer.from(await file.arrayBuffer());
-    const text = await extractResumeText(buf);
+    const text = await extractResumeText(buf, fileType);
     if (!text.trim()) {
+      const reason =
+        fileType === "pdf"
+          ? "можливо, це скан без текстового шару, і навіть OCR не впорався"
+          : "файл пошкоджений або порожній";
       return NextResponse.json(
-        { error: "Не вдалось витягти текст з PDF — можливо, це скан без текстового шару (OCR не підтримується)" },
+        { error: `Не вдалось витягти текст з файлу — ${reason}` },
         { status: 422 },
       );
     }

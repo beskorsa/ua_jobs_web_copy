@@ -1,13 +1,66 @@
 import pdfParse from "pdf-parse";
+import mammoth from "mammoth";
 import { query } from "./db";
 import { embedTexts, getOpenAI, CHAT_MODEL } from "./openai";
 import { embedAsSingleVector } from "./chunk";
 import { vecToPg, pgToVec } from "./vector";
 import { semanticSearch, type VacancyResult } from "./vacancies";
+import { extractTextViaOcr } from "./ocr";
 
-export async function extractResumeText(buffer: Buffer): Promise<string> {
+export type ResumeFileType = "pdf" | "docx";
+
+export const RESUME_MIME_TYPES: Record<string, ResumeFileType> = {
+  "application/pdf": "pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+};
+
+// Деякі браузери/ОС віддають generic "application/octet-stream" замість
+// нормального mime — тоді орієнтуємось на розширення файлу.
+export function resumeFileTypeFromName(name: string): ResumeFileType | null {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".pdf")) return "pdf";
+  if (lower.endsWith(".docx")) return "docx";
+  return null;
+}
+
+// Нижче цієї довжини вважаємо, що з файлу нічого корисного не витягнули
+// (буває порожній рядок з кількох переносів рядка "\n\n\n") — і для PDF йдемо
+// у фоллбек через OCR, а не одразу віддаємо помилку користувачу.
+const MIN_EXTRACTED_TEXT_LENGTH = 20;
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
   const data = await pdfParse(buffer);
-  return data.text;
+  const text = data.text ?? "";
+  if (text.trim().length >= MIN_EXTRACTED_TEXT_LENGTH) {
+    return text;
+  }
+
+  // pdf-parse не знайшов текстового шару — типовий випадок: резюме
+  // збережене через браузерний "Друк у PDF" (Microsoft Print to PDF), де
+  // сторінка перетворюється на контури/картинку без вбудованих шрифтів.
+  // Замість "не вдалось розпізнати" одразу пробуємо OCR.
+  try {
+    const ocrText = await extractTextViaOcr(buffer);
+    if (ocrText.trim().length >= MIN_EXTRACTED_TEXT_LENGTH) {
+      return ocrText;
+    }
+    return text; // OCR теж нічого не дав — повертаємо як є, виклик вище покаже помилку
+  } catch (e) {
+    console.error("[resumes] OCR fallback failed", e);
+    return text;
+  }
+}
+
+async function extractDocxText(buffer: Buffer): Promise<string> {
+  const { value } = await mammoth.extractRawText({ buffer });
+  return value ?? "";
+}
+
+export async function extractResumeText(buffer: Buffer, fileType: ResumeFileType): Promise<string> {
+  if (fileType === "docx") {
+    return extractDocxText(buffer);
+  }
+  return extractPdfText(buffer);
 }
 
 export async function summarizeResume(text: string): Promise<string> {

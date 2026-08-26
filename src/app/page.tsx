@@ -264,11 +264,11 @@ export default function Home() {
               />
             )}
           </svg>
-          {uploading ? "Завантажую…" : resumeSummary ? "Резюме завантажено (замінити)" : "Завантажити резюме (PDF)"}
+          {uploading ? "Завантажую…" : resumeSummary ? "Резюме завантажено (замінити)" : "Завантажити резюме (PDF/DOCX)"}
           <input
             ref={fileInputRef}
             type="file"
-            accept="application/pdf"
+            accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
             onChange={handleUpload}
             hidden
             disabled={busy}

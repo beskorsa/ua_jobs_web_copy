@@ -8,6 +8,13 @@ const nextConfig = {
   // бандлинг через webpack это ломает, поэтому тоже держим их внешними.
   experimental: {
     serverComponentsExternalPackages: ["pg", "pdf-parse", "canvas", "pdfjs-dist", "tesseract.js", "mammoth"],
+    // Автотрасування файлів (@vercel/nft) саме по собі не завжди підхоплює
+    // файли, на які немає статичного require()/import() в коді (воркер
+    // pdf.js резолвиться по обчисленому шляху в рантаймі) — тому явно
+    // форсуємо включення в бандл функції /api/resume.
+    outputFileTracingIncludes: {
+      "/api/resume": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.js", "./tessdata/**"],
+    },
   },
 };
 

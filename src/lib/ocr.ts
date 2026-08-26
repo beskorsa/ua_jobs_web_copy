@@ -14,13 +14,21 @@ const { createCanvas } = require("canvas");
 
 // Без явного workerSrc pdf.js у Node намагається зробити
 // `eval("require")("./pdf.worker.js")` (відносний шлях), що ламається
-// всередині serverless-бандла Vercel ("Setting up fake worker failed:
-// Cannot find module './pdf.worker.js'") — файл фізично лежить поруч у
-// node_modules, але relative require з середини самого пакету туди не
-// резолвиться після трасування файлів Next.js. require.resolve з нашого
-// коду — статичний виклик, який nft/webpack точно підхоплюють і кладуть
-// файл у бандл, тому явно вказуємо абсолютний шлях.
-GlobalWorkerOptions.workerSrc = require.resolve("pdfjs-dist/legacy/build/pdf.worker.js");
+// всередині serverless-бандла Vercel ("Cannot find module './pdf.worker.js'").
+// ВАЖЛИВО: обчислюємо шлях через звичайний path.join, а НЕ через
+// `require.resolve(...)` — навіть викликаний із createRequire-похідного
+// require, цей виклик все одно підмінюється Next.js/webpack на build-етапі
+// (статичний аналізатор бандлера ловить синтаксичний патерн
+// "require.resolve(літерал)" незалежно від того, звідки взявся `require`),
+// і в рантаймі повертає не реальний абсолютний шлях, а щось на кшталт
+// внутрішнього ідентифікатора модуля — звідси інша помилка ("e.endsWith is
+// not a function") замість очікуваного результату. Простий рядковий шлях
+// такому статичному аналізу не піддається, і файл однаково потрапляє в
+// serverless-бандл через `outputFileTracingIncludes` (next.config.mjs).
+GlobalWorkerOptions.workerSrc = path.join(
+  process.cwd(),
+  "node_modules/pdfjs-dist/legacy/build/pdf.worker.js",
+);
 
 // Мовні дані лежать прямо в репозиторії (tessdata/*.traineddata.gz), а не
 // тягнуться з jsdelivr CDN у рантаймі: на serverless (Vercel) зовнішній CDN —

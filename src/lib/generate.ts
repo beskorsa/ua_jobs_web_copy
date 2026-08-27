@@ -182,7 +182,10 @@ export async function filterRelevantVacancies(
   }
 
   const ids: number[] = Array.isArray(data.relevant_ids) ? data.relevant_ids.map((x: unknown) => Number(x)) : [];
-  const byId = new Map(candidates.map((c) => [c.id, c]));
+  // Number(c.id) навмисно — id з pg.query теоретично може прийти строкою
+  // (bigint-колонки; глобально виправлено в lib/db.ts type parser'ом, але
+  // ключі Map порівнюються строго, тож зайва підстраховка тут не завадить).
+  const byId = new Map(candidates.map((c) => [Number(c.id), c]));
   const ranked = ids.map((id) => byId.get(id)).filter((c): c is VacancyResult => Boolean(c));
   return ranked.slice(0, maxResults);
 }

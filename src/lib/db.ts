@@ -1,4 +1,16 @@
-import { Pool, type QueryResultRow } from "pg";
+import { Pool, types, type QueryResultRow } from "pg";
+
+// pg по умолчанию отдаёт bigint (OID 20 — тип наших id-колонок, generated
+// always as identity) как JS-строку, а не number — так driver защищается от
+// потери точности за пределами Number.MAX_SAFE_INTEGER. У нас id — обычные
+// автоинкременты, до этого предела им далеко, а вот от строкового id уже
+// был реальный баг: filterRelevantVacancies (подбор вакансій під резюме)
+// строил Map по id-строке и искал в ней Number(id) из ответа LLM — типы не
+// совпадали, Map.get() ничего не находил, и результат був 0 вакансій
+// щоразу, хоча звичайний пошук за тегами (без цього Map) працював. Парсимо
+// bigint як number глобально, щоб такий клас багів не повторювався в інших
+// місцях, де id порівнюються.
+types.setTypeParser(20, (val: string) => parseInt(val, 10));
 
 // Один Pool на весь serverless-инстанс (переиспользуется между вызовами
 // функции, пока инстанс тёплый) — так же, как get_connection() в Python-части,

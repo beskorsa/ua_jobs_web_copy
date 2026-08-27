@@ -14,6 +14,9 @@ import {
   upsertResume,
   storeResumeEmbedding,
   matchVacanciesForResume,
+  hashResumeText,
+  findResumeByUserAndHash,
+  saveResumeSummary,
   RESUME_MIME_TYPES,
   resumeFileTypeFromName,
 } from "@/lib/resumes";
@@ -58,17 +61,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const resumeId = await upsertResume(userId, file.name, text);
+    const contentHash = hashResumeText(text);
+
+    // Той самий користувач вже завантажував саме цей текст резюме раніше —
+    // не платимо повторно за embedding і LLM-сумаризацію, а просто
+    // підбираємо вакансії заново (база вакансій оновлюється парсером, тож
+    // цю частину має сенс освіжити) і кажемо, що резюме вже пам'ятаємо.
+    const existing = await findResumeByUserAndHash(userId, contentHash);
+    if (existing) {
+      const results = await matchVacanciesForResume(existing.id, text, 15, userId);
+      const summary = existing.summary ?? "";
+      await logSearchQuery(userId, "resume", summary, results.length);
+      return NextResponse.json({ resumeId: existing.id, summary, results, alreadyKnown: true });
+    }
+
+    const resumeId = await upsertResume(userId, file.name, text, contentHash);
     await storeResumeEmbedding(resumeId, text, userId);
 
     const [summary, results] = await Promise.all([
       summarizeResume(text, userId),
       matchVacanciesForResume(resumeId, text, 15, userId),
     ]);
+    await saveResumeSummary(resumeId, summary);
 
     await logSearchQuery(userId, "resume", summary, results.length);
 
-    return NextResponse.json({ resumeId, summary, results });
+    return NextResponse.json({ resumeId, summary, results, alreadyKnown: false });
   } catch (e: any) {
     console.error("[api/resume]", e);
     return NextResponse.json({ error: e.message ?? String(e) }, { status: 500 });

@@ -1,5 +1,6 @@
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
+import { createHash } from "crypto";
 import { query } from "./db";
 import { embedTexts, getOpenAI, CHAT_MODEL } from "./openai";
 import { logTokenUsage } from "./tokenUsage";
@@ -101,12 +102,46 @@ export async function getLatestResumeIdForUser(userId: string): Promise<number |
   return rows[0]?.id ?? null;
 }
 
-export async function upsertResume(userId: string, filename: string, rawText: string): Promise<number> {
+// Нормалізуємо (тримаємо тільки суттєві пробіли) перед хешем, щоб той самий
+// PDF, перезбережений/перезавантажений повторно (де можуть трохи розійтись
+// невидимі пробіли/переноси рядків від pdf-parse), все одно впізнавався як
+// той самий текст резюме.
+export function hashResumeText(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return createHash("sha256").update(normalized, "utf8").digest("hex");
+}
+
+/**
+ * Чи вже завантажував цей user_id резюме з таким самим текстом раніше —
+ * щоб не платити знову за embedding і LLM-сумаризацію того самого файлу
+ * (наприклад, коли людина випадково завантажує той самий PDF вдруге).
+ */
+export async function findResumeByUserAndHash(
+  userId: string,
+  contentHash: string,
+): Promise<{ id: number; summary: string | null } | null> {
+  const rows = await query<{ id: number; summary: string | null }>(
+    `select id, summary from resumes where user_id = $1 and content_hash = $2 order by uploaded_at desc limit 1`,
+    [userId, contentHash],
+  );
+  return rows[0] ?? null;
+}
+
+export async function upsertResume(
+  userId: string,
+  filename: string,
+  rawText: string,
+  contentHash: string,
+): Promise<number> {
   const rows = await query<{ id: number }>(
-    `insert into resumes (filename, raw_text, user_id) values ($1, $2, $3) returning id`,
-    [filename, rawText, userId],
+    `insert into resumes (filename, raw_text, user_id, content_hash) values ($1, $2, $3, $4) returning id`,
+    [filename, rawText, userId, contentHash],
   );
   return rows[0].id;
+}
+
+export async function saveResumeSummary(resumeId: number, summary: string): Promise<void> {
+  await query(`update resumes set summary = $1 where id = $2`, [summary, resumeId]);
 }
 
 export async function storeResumeEmbedding(

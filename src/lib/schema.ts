@@ -67,6 +67,18 @@ export async function ensureSchema(): Promise<void> {
     );
   `);
 
+  // content_hash — sha256 витягнутого тексту резюме: дозволяє впізнати, що
+  // цей самий користувач вже завантажував саме цей файл (той самий текст),
+  // і не ганяти повторно embedding + LLM-сумаризацію за ті самі гроші/токени.
+  // summary кешує результат summarizeResume(), щоб при повторному
+  // завантаженні того самого резюме показати "ми вже пам'ятаємо" миттєво,
+  // без нового виклику OpenAI.
+  await query(`alter table resumes add column if not exists content_hash text;`);
+  await query(`alter table resumes add column if not exists summary text;`);
+  await query(
+    "create unique index if not exists idx_resumes_user_hash on resumes (user_id, content_hash) where content_hash is not null;",
+  );
+
   await query(`
     create table if not exists resume_sections (
       id           bigint generated always as identity primary key,

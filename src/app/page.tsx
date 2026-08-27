@@ -175,12 +175,15 @@ export default function Home() {
       setResumeId(data.resumeId);
       setResumeSummary(data.summary);
       setVacancies(data.results);
+      const intro = data.alreadyKnown
+        ? "Це резюме вже є в базі — ми його пам'ятаємо, повторно не обробляли."
+        : data.summary;
       setMessages((m) => [
         ...m,
         { role: "user", content: `Завантажено резюме: ${file.name}` },
         {
           role: "assistant",
-          content: `${data.summary}\n\nПідібрав ${data.results.length} вакансій під це резюме.`,
+          content: `${intro}\n\nПідібрав ${data.results.length} вакансій під це резюме.`,
           vacancies: data.results,
         },
       ]);

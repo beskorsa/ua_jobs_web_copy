@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { VacancyCard, type VacancyCardData } from "./VacancyCard";
 
 type Props = {
@@ -14,6 +14,18 @@ type Props = {
 
 export function VacancyList({ vacancies, defaultOpen = true }: Props) {
   const [open, setOpen] = useState(defaultOpen);
+
+  // useState(defaultOpen) читає проп лише при першому монтуванні — сам
+  // компонент не розмонтовується, коли з'являється нове повідомлення, тому
+  // без цього ефекту список, який щойно був "останнім" (і був розгорнутий),
+  // так і лишався розгорнутим назавжди після того, як з'явився ще один
+  // результат пошуку. Синхронізуємо стан з проханням щоразу, коли prop
+  // справді змінюється — саме в момент, коли цей список перестає бути
+  // останнім (і має автоматично згорнутись) або, навпаки, стає останнім.
+  useEffect(() => {
+    setOpen(defaultOpen);
+  }, [defaultOpen]);
+
   if (!vacancies?.length) return null;
 
   return (

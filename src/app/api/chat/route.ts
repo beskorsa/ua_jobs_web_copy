@@ -16,7 +16,7 @@ import {
 } from "@/lib/vacancies";
 import { fetchVacancyPage } from "@/lib/fetchExternalVacancy";
 import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy, classifyLinkContent } from "@/lib/generate";
-import { resolveOwnedResumeId, ingestResumeText } from "@/lib/resumes";
+import { resolveOwnedResumeId, ingestResumeText, cleanResumeText } from "@/lib/resumes";
 import { query } from "@/lib/db";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
 import { logSearchQuery } from "@/lib/searchLog";
@@ -324,7 +324,8 @@ export async function POST(req: NextRequest) {
                 // врахували, просто прислала його лінком, а не файлом. Той
                 // самий конвеєр, що і /api/resume: зберегти + підібрати
                 // вакансії, а не змушувати завантажувати файл вручну.
-                const ingested = await ingestResumeText(userId, page.title || url, page.text);
+                const cleanedText = await cleanResumeText(page.text, userId);
+                const ingested = await ingestResumeText(userId, page.title || url, cleanedText);
                 const intro = ingested.alreadyKnown
                   ? "Це резюме вже є в базі — ми його пам'ятаємо, повторно не обробляли."
                   : ingested.summary;
@@ -394,7 +395,8 @@ export async function POST(req: NextRequest) {
               // Так само, як з лінком: людина хотіла, щоб врахували резюме —
               // просто вставила текст замість завантаження файлу. Обробляємо
               // тим самим конвеєром, що і /api/resume.
-              const ingested = await ingestResumeText(userId, title, text);
+              const cleanedText = await cleanResumeText(text, userId);
+              const ingested = await ingestResumeText(userId, title, cleanedText);
               const intro = ingested.alreadyKnown
                 ? "Це резюме вже є в базі — ми його пам'ятаємо, повторно не обробляли."
                 : ingested.summary;

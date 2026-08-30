@@ -106,6 +106,44 @@ export async function looksLikeResume(text: string, userId?: string | null): Pro
   }
 }
 
+/**
+ * Текст резюме, отриманий не з файлу (PDF/DOCX через pdf-parse/mammoth — вже
+ * чистий), а зі сторінки за лінком (fetchVacancyPage) чи вставленим у чат
+ * текстом — може містити шум сторінки: навігацію сайту, футер, cookie-банер,
+ * "Увійти"/"Зареєструватись" тощо (htmlToText там — грубий regex-стрип
+ * тегів, без розуміння структури сторінки). Цей шум псує і векторний
+ * embedding (гірший matchVacanciesForResume), і якість summarizeResume —
+ * тому підбір вакансій за лінком/текстом був помітно гіршим, ніж за файлом.
+ * Одна дешева LLM-нормалізація ПІСЛЯ classifyLinkContent (уже підтвердили,
+ * що це резюме, тому зайвих токенів на "може не резюме" тут не палимо)
+ * вирівнює якість вхідного тексту з файловим шляхом.
+ */
+export async function cleanResumeText(rawText: string, userId?: string | null): Promise<string> {
+  const openai = getOpenAI();
+  const resp = await openai.chat.completions.create({
+    model: CHAT_MODEL,
+    temperature: 0,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Нижче — текст, витягнутий зі сторінки резюме/профілю кандидата (сайт, посилання) або " +
+          "вставлений користувачем у чат. Він може містити зайве: навігацію сайту, рекламу, кнопки, " +
+          "футер, cookie-банери, заклики на кшталт «Увійти»/«Зареєструватись», меню сайту тощо. " +
+          "Виведи ТІЛЬКИ сам текст резюме — досвід роботи, навички, освіту, контакти, про себе — " +
+          "без стороннього шуму сторінки. Нічого не додавай від себе, не скорочуй і не переказуй " +
+          "своїми словами — просто прибери шум. Якщо не впевнений, що є шумом, — залиш як є.",
+      },
+      { role: "user", content: rawText.slice(0, 12000) },
+    ],
+  });
+  await logTokenUsage("resume_clean", CHAT_MODEL, resp.usage, userId);
+  const cleaned = resp.choices[0].message.content?.trim();
+  // Фейл-сейф: якщо LLM повернула щось підозріло коротке (порожньо, відмова
+  // тощо) — краще віддати сирий текст, ніж втратити резюме користувача.
+  return cleaned && cleaned.length > 50 ? cleaned : rawText;
+}
+
 export async function summarizeResume(text: string, userId?: string | null): Promise<string> {
   const openai = getOpenAI();
   const resp = await openai.chat.completions.create({

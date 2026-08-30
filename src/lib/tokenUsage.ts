@@ -15,7 +15,8 @@ export type TokenUsageKind =
   | "resume_tips" // поради по покращенню резюме
   | "resume_summary" // короткий підсумок резюме одразу після завантаження
   | "resume_classify" // дешева перевірка "це взагалі резюме?" перед дорогою обробкою
-  | "content_classify"; // тип посилання/тексту в чаті: вакансія / резюме / щось інше
+  | "content_classify" // тип посилання/тексту в чаті: вакансія / резюме / щось інше
+  | "resume_clean"; // очищення тексту резюме від шуму сторінки (нав, футер тощо) перед ingestResumeText
 
 type UsageLike =
   | { prompt_tokens?: number | null; completion_tokens?: number | null; total_tokens?: number | null }

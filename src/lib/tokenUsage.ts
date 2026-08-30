@@ -13,7 +13,8 @@ export type TokenUsageKind =
   | "ask_about_vacancy" // вільне питання про конкретну вакансію
   | "relevance_filter" // LLM-відсів нерелевантних вакансій після векторного пошуку по резюме
   | "resume_tips" // поради по покращенню резюме
-  | "resume_summary"; // короткий підсумок резюме одразу після завантаження
+  | "resume_summary" // короткий підсумок резюме одразу після завантаження
+  | "resume_classify"; // дешева перевірка "це взагалі резюме?" перед дорогою обробкою
 
 type UsageLike =
   | { prompt_tokens?: number | null; completion_tokens?: number | null; total_tokens?: number | null }

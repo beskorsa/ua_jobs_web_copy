@@ -10,6 +10,7 @@ import { ensureSchema } from "@/lib/schema";
 import { getOrCreateUserId } from "@/lib/user";
 import {
   extractResumeText,
+  looksLikeResume,
   summarizeResume,
   upsertResume,
   storeResumeEmbedding,
@@ -73,6 +74,23 @@ export async function POST(req: NextRequest) {
       const summary = existing.summary ?? "";
       await logSearchQuery(userId, "resume", summary, results.length);
       return NextResponse.json({ resumeId: existing.id, summary, results, alreadyKnown: true });
+    }
+
+    // Дешева перевірка ПЕРЕД дорогою обробкою (embedding + сумаризація +
+    // LLM-фільтр по десяткам вакансій) — щоб не палити токени на файл, який
+    // виявився не резюме (вакансія, стаття, договір, не той файл узагалі).
+    // Йде ПІСЛЯ перевірки на дублікат вище — для вже відомого резюме сенсу
+    // перевіряти вдруге немає.
+    const isResume = await looksLikeResume(text, userId);
+    if (!isResume) {
+      return NextResponse.json(
+        {
+          error:
+            "Це не схоже на резюме — не бачу опису досвіду роботи, навичок чи освіти. " +
+            "Завантажте файл із вашим CV/резюме (PDF або DOCX).",
+        },
+        { status: 422 },
+      );
     }
 
     const resumeId = await upsertResume(userId, file.name, text, contentHash);

@@ -66,6 +66,46 @@ export async function extractResumeText(buffer: Buffer, fileType: ResumeFileType
   return extractPdfText(buffer);
 }
 
+/**
+ * Дешева перевірка ПЕРЕД дорогою обробкою: чи це взагалі текст резюме/CV, а
+ * не випадковий файл (вакансія, стаття, договір, порожній щось), який
+ * користувач переплутав чи завантажив помилково. Без цієї перевірки такий
+ * файл все одно проходив би повний цикл — embedding (storeResumeEmbedding),
+ * summarizeResume і LLM-фільтр по 40+ вакансіях (matchVacanciesForResume) —
+ * тобто саме ту дорогу частину, яку і треба відсікти. Сама перевірка —
+ * маленький виклик з обрізаним текстом і жорстким лімітом токенів
+ * відповіді, тому дешевша за будь-який з наступних кроків на порядки.
+ */
+export async function looksLikeResume(text: string, userId?: string | null): Promise<boolean> {
+  const openai = getOpenAI();
+  const resp = await openai.chat.completions.create({
+    model: CHAT_MODEL,
+    temperature: 0,
+    max_tokens: 20,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "Визнач, чи текст нижче — це резюме/CV кандидата (розповідь про ЙОГО досвід роботи, навички, " +
+          "освіту — з метою відгукнутись на вакансію), а НЕ щось інше (опис вакансії, стаття, договір, " +
+          "рахунок, лист, випадковий уривок тексту, порожній чи нечитабельний вміст). " +
+          'Відповідай ЛИШЕ JSON {"is_resume": true} або {"is_resume": false}.',
+      },
+      { role: "user", content: text.slice(0, 3000) },
+    ],
+  });
+  await logTokenUsage("resume_classify", CHAT_MODEL, resp.usage, userId);
+
+  const raw = resp.choices[0].message.content || "{}";
+  try {
+    const data = JSON.parse(raw);
+    return data.is_resume !== false; // fail-open: незрозуміла відповідь не блокує легітимне резюме
+  } catch {
+    return true;
+  }
+}
+
 export async function summarizeResume(text: string, userId?: string | null): Promise<string> {
   const openai = getOpenAI();
   const resp = await openai.chat.completions.create({

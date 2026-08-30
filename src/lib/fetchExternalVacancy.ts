@@ -4,28 +4,80 @@
 // зависимостей (cheerio и т.п.) — regex-парсинг достаточно надёжен для
 // вытаскивания читаемого текста из произвольной HTML-страницы вакансии.
 
+import { Agent } from "undici";
+import { lookup as dnsLookup, type LookupOptions } from "node:dns";
+import net from "node:net";
+
 const BLOCKED_HOSTNAMES = new Set(["localhost", "0.0.0.0", "::1", "metadata.google.internal"]);
 
-// Грубая защита от SSRF: не даём дёргать внутренние/приватные адреса с
-// сервера по ссылке, присланной анонимным пользователем.
+function isPrivateIPv4(ip: string): boolean {
+  const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 169 && b === 254) return true; // сюди ж потрапляє cloud metadata (169.254.169.254)
+  if (a === 0) return true;
+  return false;
+}
+
+function isPrivateIPv6(ip: string): boolean {
+  const h = ip.toLowerCase();
+  if (h === "::1" || h === "::") return true;
+  if (h.startsWith("fe8") || h.startsWith("fe9") || h.startsWith("fea") || h.startsWith("feb")) return true; // fe80::/10
+  if (h.startsWith("fc") || h.startsWith("fd")) return true; // fc00::/7, unique local
+  const mapped = h.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (mapped) return isPrivateIPv4(mapped[1]);
+  return false;
+}
+
+function isPrivateIp(ip: string): boolean {
+  if (net.isIPv4(ip)) return isPrivateIPv4(ip);
+  if (net.isIPv6(ip)) return isPrivateIPv6(ip);
+  return true; // невідомий формат — краще відмовити, ніж пропустити
+}
+
+// Груба перевірка hostname (без DNS) — швидко відсіює очевидне (localhost,
+// літеральний приватний IP в самому посиланні) ще ДО мережевого запиту.
 function isPrivateHostname(hostname: string): boolean {
   const h = hostname.toLowerCase();
   if (BLOCKED_HOSTNAMES.has(h)) return true;
   if (h === "127.0.0.1" || h.endsWith(".localhost")) return true;
-
-  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) {
-    const a = Number(m[1]);
-    const b = Number(m[2]);
-    if (a === 10) return true;
-    if (a === 127) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 0) return true;
-  }
+  if (net.isIP(h)) return isPrivateIp(h);
   return false;
 }
+
+// Справжній захист від SSRF/DNS rebinding: hostname-перевірка вище
+// перевіряє лише те, що написано в посиланні, а не те, куди воно РЕАЛЬНО
+// резолвиться — зловмисник може зареєструвати публічний домен, DNS якого
+// повертає приватну/metadata-адресу (169.254.169.254 тощо), і hostname-
+// перевірка це пропустить. Крім того, fetch() робить власний DNS lookup
+// у момент з'єднання — окрема перевірка "резолвнули, перевірили, потім
+// зробили fetch" має вікно (TOCTOU): DNS може віддати іншу адресу другим
+// запитом. Тому підміняємо сам lookup, який undici використовує ПІД ЧАС
+// з'єднання (включно з кожним редіректом — свій lookup на кожен хоп): яку
+// адресу перевірили, до тієї й підключаємось, без розриву в часі.
+function ssrfSafeLookup(
+  hostname: string,
+  options: LookupOptions,
+  callback: (err: NodeJS.ErrnoException | null, address: any, family?: number) => void,
+): void {
+  dnsLookup(hostname, { ...options, all: true } as LookupOptions & { all: true }, (err, addresses) => {
+    if (err) return callback(err, [] as any);
+    const list = addresses as unknown as { address: string; family: number }[];
+    const safe = list.filter((a) => !isPrivateIp(a.address));
+    if (!safe.length) {
+      callback(new Error(`SSRF protection: "${hostname}" resolves only to disallowed addresses`), [] as any);
+      return;
+    }
+    callback(null, safe as any);
+  });
+}
+
+const ssrfSafeDispatcher = new Agent({ connect: { lookup: ssrfSafeLookup } });
 
 function decodeEntities(s: string): string {
   return s
@@ -128,6 +180,10 @@ export async function fetchVacancyPage(rawUrl: string): Promise<FetchedVacancyPa
     res = await fetch(url.toString(), {
       signal: controller.signal,
       redirect: "follow",
+      // @ts-expect-error dispatcher — undici-специфічна опція, відсутня в
+      // стандартному DOM-типі RequestInit, але підтримується Node-реалізацією
+      // fetch (built on undici). Саме через неї підмінюється DNS lookup.
+      dispatcher: ssrfSafeDispatcher,
       headers: {
         // Деякі сайти (work.ua тощо) віддають 403 будь-якому UA, що не
         // виглядає як звичайний браузер — кастомний бот-рядок і мінімум
@@ -140,6 +196,13 @@ export async function fetchVacancyPage(rawUrl: string): Promise<FetchedVacancyPa
       },
     });
   } catch (e: any) {
+    // undici загортає нашу ssrfSafeLookup-помилку в TypeError "fetch failed"
+    // з .cause — дістаємо справжню причину, щоб не плутати SSRF-блок зі
+    // звичайним мережевим збоєм і не показувати користувачу деталі захисту.
+    const cause = e?.cause?.message ?? e?.message ?? "";
+    if (typeof cause === "string" && cause.includes("SSRF protection")) {
+      throw new Error("Це посилання недоступне");
+    }
     throw new Error(e?.name === "AbortError" ? "Сторінка не відповіла вчасно" : `Не вдалось завантажити сторінку: ${e.message}`);
   } finally {
     clearTimeout(timeout);

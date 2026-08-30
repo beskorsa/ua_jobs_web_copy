@@ -1,8 +1,27 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+import { timingSafeEqual } from "node:crypto";
 import { ensureSchema } from "@/lib/schema";
 import { getUsageStats } from "@/lib/tokenUsage";
+
+// Звичайне "a !== b" порівнює посимвольно і виходить одразу на першому
+// розбіжному байті — теоретично за різницею в часі відповіді можна підбирати
+// ключ по одному символу (timing attack). Ризик тут невисокий (секрет вводить
+// вручну одна людина, не публічний логін-флоу), але виправити дешево:
+// timingSafeEqual порівнює за постійний час незалежно від того, де перша
+// розбіжність. Буфери мають бути однакової довжини — інакше кидає виняток,
+// тому при розбіжній довжині все одно виконуємо порівняння (з ключем самим
+// із собою, щоб не "зливати" довжину явною короткою гілкою) і повертаємо false.
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
 
 // Проста сторінка-звіт, захищена лише секретним ключем у query-параметрі
 // (?key=...), що звіряється з process.env.ADMIN_KEY — без повноцінної
@@ -105,7 +124,7 @@ export default async function TokensAdminPage({
   searchParams: { key?: string; days?: string };
 }) {
   const adminKey = process.env.ADMIN_KEY;
-  if (!adminKey || searchParams.key !== adminKey) {
+  if (!adminKey || !searchParams.key || !safeEqual(searchParams.key, adminKey)) {
     return (
       <div
         style={{

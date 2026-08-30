@@ -347,6 +347,14 @@ export async function POST(req: NextRequest) {
                 ]);
                 return NextResponse.json({ reply });
               }
+              if (contentType === "closed_vacancy") {
+                reply = "Ця вакансія вже закрита/неактуальна — сайт більше не приймає на неї відгуки.";
+                await query(`insert into chat_messages (user_id, role, content) values ($1, 'assistant', $2)`, [
+                  userId,
+                  reply,
+                ]);
+                return NextResponse.json({ reply });
+              }
 
               vacancy = await storeExternalVacancy(page);
               fromDb = false;
@@ -410,6 +418,14 @@ export async function POST(req: NextRequest) {
             }
             if (contentType === "other") {
               reply = "Це не схоже на опис вакансії — вставте текст конкретного оголошення про роботу.";
+              await query(`insert into chat_messages (user_id, role, content) values ($1, 'assistant', $2)`, [
+                userId,
+                reply,
+              ]);
+              return NextResponse.json({ reply });
+            }
+            if (contentType === "closed_vacancy") {
+              reply = "Ця вакансія вже закрита/неактуальна — сайт більше не приймає на неї відгуки.";
               await query(`insert into chat_messages (user_id, role, content) values ($1, 'assistant', $2)`, [
                 userId,
                 reply,

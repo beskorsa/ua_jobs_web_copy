@@ -63,6 +63,50 @@ const OFFICE_ONLY_MARKERS = [
   "без возможности удаленной работы", "виключно офлайн формат", "исключительно офлайн формат",
 ];
 
+// Слова заперечення БІЛЯ маркера (до чи після) скасовують збіг — без цього
+// фраза на кшталт "віддалено не розглядаємо" хибно матчилась би як
+// REMOTE_MARKERS (простий includes() не бачить заперечення поруч). Заперечення
+// природною мовою трапляється по обидва боки: "не працюємо віддалено"
+// (перед маркером) і "віддалено не розглядаємо" (після маркера — "не"
+// стосується самого слова "віддалено", хоч і йде за ним). Тому дивимось
+// в обидва боки. Знайдено регресійним тестом tests/vacancies.workMode.test.ts
+// на реальному прикладі "Робота лише в офісі, віддалено не розглядаємо",
+// який спершу хибно класифікувався як 'remote' замість 'office'.
+const NEGATION_WORDS = ["не ", "без ", "нема ", "немає ", "no ", "not "];
+const NEGATION_LOOKAROUND = 20; // символів до/після маркера, де шукаємо заперечення
+const CLAUSE_BOUNDARY = /[,.;!?\n]/; // заперечення в СУСІДНІЙ клаузі (через кому тощо) не рахується
+
+// Обрізає вікно по першій межі клаузи (кома, крапка тощо), щоб заперечення з
+// сусіднього, непов'язаного фрагмента речення не гасило маркер помилково —
+// напр. у "робота лише в офісі, віддалено не розглядаємо" заперечення "не"
+// стосується "віддалено" в іншій клаузі через кому, а не "офісі".
+function clauseBoundedWindow(s: string, fromEnd: boolean): string {
+  const boundaryIdx = fromEnd
+    ? (() => {
+        const m = [...s].reverse().join("").search(CLAUSE_BOUNDARY);
+        return m === -1 ? -1 : s.length - m;
+      })()
+    : s.search(CLAUSE_BOUNDARY);
+  if (fromEnd) return boundaryIdx === -1 ? s : s.slice(boundaryIdx);
+  return boundaryIdx === -1 ? s : s.slice(0, boundaryIdx);
+}
+
+function hasMarker(text: string, markers: string[]): boolean {
+  for (const marker of markers) {
+    let idx = text.indexOf(marker);
+    while (idx !== -1) {
+      const rawBefore = text.slice(Math.max(0, idx - NEGATION_LOOKAROUND), idx);
+      const rawAfter = text.slice(idx + marker.length, idx + marker.length + NEGATION_LOOKAROUND);
+      const before = clauseBoundedWindow(rawBefore, true);
+      const after = clauseBoundedWindow(rawAfter, false);
+      const negated = NEGATION_WORDS.some((neg) => before.includes(neg) || after.includes(neg));
+      if (!negated) return true;
+      idx = text.indexOf(marker, idx + 1);
+    }
+  }
+  return false;
+}
+
 /**
  * Евристична класифікація remote/office/hybrid для вакансій, які приходять
  * НЕ через парсер (ua_jobs_parser вже виставляє work_mode сам — див.
@@ -73,9 +117,9 @@ const OFFICE_ONLY_MARKERS = [
  */
 export function classifyWorkMode(title: string, description: string): WorkMode | null {
   const text = `${title}\n${description}`.toLowerCase();
-  if (HYBRID_MARKERS.some((m) => text.includes(m))) return "hybrid";
-  const hasRemote = REMOTE_MARKERS.some((m) => text.includes(m));
-  const hasOfficeOnly = OFFICE_ONLY_MARKERS.some((m) => text.includes(m));
+  if (hasMarker(text, HYBRID_MARKERS)) return "hybrid";
+  const hasRemote = hasMarker(text, REMOTE_MARKERS);
+  const hasOfficeOnly = hasMarker(text, OFFICE_ONLY_MARKERS);
   if (hasOfficeOnly && !hasRemote) return "office";
   if (hasRemote) return "remote";
   return null;

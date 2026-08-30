@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:setup": "tsx scripts/ensure-schema.ts"
+    "db:setup": "tsx scripts/ensure-schema.ts",
+    "test": "tsx --experimental-test-module-mocks --test tests/*.test.ts"
   },
   "dependencies": {
     "canvas": "^3.2.3",

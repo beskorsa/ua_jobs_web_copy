@@ -24,12 +24,22 @@ export type RateLimitResult = { allowed: true } | { allowed: false; retryAfterSe
 // пошуку/чату/резюме — тобто саме та накрутка OpenAI-рахунку, від якої
 // rate-limit і мав захищати. Тепер значення береться з env (ADMIN_BYPASS_USER_IDS,
 // кома-розділений список) — не потрапляє в git, задається в Vercel.
-const RATE_LIMIT_BYPASS_USER_IDS = new Set(
-  (process.env.ADMIN_BYPASS_USER_IDS ?? "")
-    .split(",")
-    .map((id) => id.trim())
-    .filter(Boolean),
-);
+// Винесено в чисту функцію окремо від зчитування process.env — щоб можна
+// було покрити тестом саму логіку парсингу (порожній рядок, зайві коми,
+// пробіли навколо id) без необхідності підміняти process.env у тестах.
+// Див. tests/rateLimit.bypass.test.ts — регресійний тест саме на цю функцію,
+// бо попередня версія (хардкод id прямо в коді) вже була знайдена як
+// вразливість під час аудиту безпеки (див. коментар нижче).
+export function parseBypassUserIds(raw: string | undefined): Set<string> {
+  return new Set(
+    (raw ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+}
+
+const RATE_LIMIT_BYPASS_USER_IDS = parseBypassUserIds(process.env.ADMIN_BYPASS_USER_IDS);
 
 export async function checkRateLimit(
   userId: string,

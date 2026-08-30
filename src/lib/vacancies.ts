@@ -159,8 +159,11 @@ export async function getVacancyByUrl(rawUrl: string): Promise<Vacancy | null> {
 // (scoreVacancy/cover letter/ask_about_vacancy по id, карточка на фронте).
 // ON CONFLICT(url) — повторная присылка той же ссылки просто обновляет текст,
 // а не плодит дубли.
-export async function upsertExternalVacancy(rawUrl: string): Promise<Vacancy> {
-  const page = await fetchVacancyPage(rawUrl);
+// Розділено на fetch (тут викликається) і store (нижче) — щоб виклик у чаті
+// (analyze_vacancy_link) міг спершу перевірити ЩО завантажилось (див.
+// looksLikeResume у route.ts), і НЕ зберігати в vacancies сторінку, яка
+// виявилась чиїмось резюме, а не вакансією.
+export async function storeExternalVacancy(page: Awaited<ReturnType<typeof fetchVacancyPage>>): Promise<Vacancy> {
   const rows = await query<Vacancy>(
     `insert into vacancies (source, external_id, keyword, title, company, description, url)
      values ('external_link', null, 'external_link', $1, null, $2, $3)
@@ -174,6 +177,14 @@ export async function upsertExternalVacancy(rawUrl: string): Promise<Vacancy> {
     [page.title.slice(0, 300), page.text, page.finalUrl],
   );
   return rows[0];
+}
+
+// Зручна обгортка fetch+store для місць, де перевірка "це точно вакансія?"
+// не потрібна (наразі — ніде окрім через analyze_vacancy_link у чаті, який
+// тепер сам викликає fetchVacancyPage + storeExternalVacancy окремо).
+export async function upsertExternalVacancy(rawUrl: string): Promise<Vacancy> {
+  const page = await fetchVacancyPage(rawUrl);
+  return storeExternalVacancy(page);
 }
 
 // Фолбек, коли пряме завантаження за посиланням не вдалось (403 від

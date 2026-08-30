@@ -6,9 +6,17 @@ import { ensureSchema } from "@/lib/schema";
 import { getOrCreateUserId } from "@/lib/user";
 import { getOpenAI, CHAT_MODEL, embedText } from "@/lib/openai";
 import { logTokenUsage } from "@/lib/tokenUsage";
-import { semanticSearch, getVacancy, getVacancyByUrl, upsertExternalVacancy, upsertVacancyFromText } from "@/lib/vacancies";
+import {
+  semanticSearch,
+  getVacancy,
+  getVacancyByUrl,
+  storeExternalVacancy,
+  upsertVacancyFromText,
+  type Vacancy,
+} from "@/lib/vacancies";
+import { fetchVacancyPage } from "@/lib/fetchExternalVacancy";
 import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy } from "@/lib/generate";
-import { resolveOwnedResumeId } from "@/lib/resumes";
+import { resolveOwnedResumeId, looksLikeResume } from "@/lib/resumes";
 import { query } from "@/lib/db";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
 import { logSearchQuery } from "@/lib/searchLog";
@@ -296,8 +304,34 @@ export async function POST(req: NextRequest) {
             // вона там вже лежить з повним описом і http-запит з сервера
             // взагалі не потрібен (а саме він ловить 403 від бот-захисту).
             const known = await getVacancyByUrl(url);
-            const vacancy = known ?? (await upsertExternalVacancy(url));
-            const fromDb = Boolean(known);
+            let vacancy: Vacancy;
+            let fromDb: boolean;
+            if (known) {
+              vacancy = known;
+              fromDb = true;
+            } else {
+              // Люди плутають поле "посилання на вакансію" з посиланням на
+              // СВОЄ резюме (типовий приклад — публічна анкета work.ua/
+              // resumes/NNN/, вона не приватна, тож fetchVacancyPage успішно
+              // її завантажить). Без цієї перевірки чиєсь резюме зберігалось
+              // би в vacancies як ніби-вакансія — і псувало базу, і палило
+              // токени на подальший scoreVacancy. Перевіряємо ДО збереження.
+              const page = await fetchVacancyPage(url);
+              const isResume = await looksLikeResume(page.text, userId);
+              if (isResume) {
+                reply =
+                  "Це схоже на посилання на резюме, а не на вакансію — сюди вставляйте посилання на " +
+                  "оголошення про роботу. Якщо хотіли, щоб я врахував ваше резюме, завантажте його файлом " +
+                  "через кнопку «Завантажити резюме» вище.";
+                await query(`insert into chat_messages (user_id, role, content) values ($1, 'assistant', $2)`, [
+                  userId,
+                  reply,
+                ]);
+                return NextResponse.json({ reply });
+              }
+              vacancy = await storeExternalVacancy(page);
+              fromDb = false;
+            }
             payload = { action: "search", results: [vacancy] };
             if (resumeId) {
               const resumeRows = await query<{ raw_text: string }>(`select raw_text from resumes where id = $1`, [
@@ -332,6 +366,20 @@ export async function POST(req: NextRequest) {
           reply = "Текст вакансії закороткий — вставте повний опис.";
         } else {
           try {
+            // Той самий випадок, що і з посиланням: людина може вставити
+            // сюди текст СВОГО резюме замість опису вакансії. Перевіряємо
+            // ДО збереження в vacancies і ДО scoreVacancy нижче.
+            const isResume = await looksLikeResume(text, userId);
+            if (isResume) {
+              reply =
+                "Це схоже на текст резюме, а не на опис вакансії. Якщо хотіли, щоб я врахував ваше резюме, " +
+                "завантажте його файлом через кнопку «Завантажити резюме» вище — вона саме для цього.";
+              await query(`insert into chat_messages (user_id, role, content) values ($1, 'assistant', $2)`, [
+                userId,
+                reply,
+              ]);
+              return NextResponse.json({ reply });
+            }
             const vacancy = await upsertVacancyFromText(title, text);
             payload = { action: "search", results: [vacancy] };
             if (resumeId) {

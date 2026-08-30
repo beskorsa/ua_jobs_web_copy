@@ -3,6 +3,8 @@ import { query } from "./db";
 import { vecToPg } from "./vector";
 import { fetchVacancyPage } from "./fetchExternalVacancy";
 
+export type WorkMode = "remote" | "office" | "hybrid";
+
 export type VacancyResult = {
   id: number;
   source: string;
@@ -14,6 +16,7 @@ export type VacancyResult = {
   salary_min: number | null;
   salary_max: number | null;
   salary_currency: string | null;
+  work_mode: WorkMode | null;
   matched_chunk: string;
   distance: number;
 };
@@ -30,7 +33,53 @@ export type Vacancy = {
   salary_min: number | null;
   salary_max: number | null;
   salary_currency: string | null;
+  work_mode: WorkMode | null;
 };
+
+// Ключові слова — свідомо ширші за один точний вираз (укр/рос/eng варіанти,
+// бо джерела — суміш українських і зросійщених сайтів). Порядок перевірки
+// важливий: hybrid-маркер переважає (навіть якщо поруч згадано "віддалено" —
+// це вже не суто remote), потім remote, і лише насамкінець — office-only
+// маркер, який рахується ЛИШЕ якщо ніде поруч не згадано remote (інакше
+// "переважно офіс, можливо віддалено за домовленістю" хибно стало б "office").
+// Дзеркало classify_work_mode() у ua_jobs_parser/scrapers/base.py — тримати
+// списки маркерів синхронізованими, якщо редагуєш один з двох.
+const REMOTE_MARKERS = [
+  "віддалено", "видалено", "удалённо", "удаленно", "дистанційно", "дистанционно",
+  "remote", "work from home", "wfh", "з дому", "из дома", "фултайм ремоут",
+  "remote-first", "remote work", "повністю віддалена", "полностью удалённая",
+];
+const HYBRID_MARKERS = [
+  "гібридний формат", "гибридный формат", "гібрид", "гибрид", "hybrid",
+  "частково віддалено", "частично удаленно", "частково в офісі", "частично в офисе",
+  "2 дні в офісі", "3 дні в офісі", "2 дня в офисе", "3 дня в офисе",
+  "2 days in office", "3 days in office", "hybrid work",
+];
+const OFFICE_ONLY_MARKERS = [
+  "тільки офіс", "только офис", "офісний формат", "офисный формат",
+  "office only", "on-site only", "onsite only", "робота лише в офісі",
+  "работа только в офисе", "присутність в офісі обов'язкова",
+  "присутствие в офисе обязательно", "без можливості віддаленої роботи",
+  "без возможности удаленной работы", "виключно офлайн формат", "исключительно офлайн формат",
+];
+
+/**
+ * Евристична класифікація remote/office/hybrid для вакансій, які приходять
+ * НЕ через парсер (ua_jobs_parser вже виставляє work_mode сам — див.
+ * classify_work_mode у scrapers/base.py), а через чат: пряме посилання
+ * (analyze_vacancy_link) чи вставлений текст (analyze_vacancy_text). Без
+ * цього такі вакансії завжди мали б work_mode = null, і картка на фронті не
+ * могла б показати бейдж — хоча текст вакансії найчастіше прямо про це каже.
+ */
+export function classifyWorkMode(title: string, description: string): WorkMode | null {
+  const text = `${title}\n${description}`.toLowerCase();
+  if (HYBRID_MARKERS.some((m) => text.includes(m))) return "hybrid";
+  const hasRemote = REMOTE_MARKERS.some((m) => text.includes(m));
+  const hasOfficeOnly = OFFICE_ONLY_MARKERS.some((m) => text.includes(m));
+  if (hasOfficeOnly && !hasRemote) return "office";
+  if (hasRemote) return "remote";
+  return null;
+}
 
 // Портировано из semantic_search() в postgres_store.py — тот же приём
 // distinct on (v.id) + сортировка/limit во внешнем запросе (см. комментарий
@@ -81,20 +130,20 @@ export async function semanticSearch(
 
   const sql = `
     select id, source, title, company, url, published_at, city,
-           salary_min, salary_max, salary_currency, matched_chunk, distance
+           salary_min, salary_max, salary_currency, work_mode, matched_chunk, distance
     from (
       select distinct on (lower(title), coalesce(lower(company), ''))
         id, source, title, company, url, published_at, city,
-        salary_min, salary_max, salary_currency, matched_chunk, distance
+        salary_min, salary_max, salary_currency, work_mode, matched_chunk, distance
       from (
         select id, source, title, company, url, published_at, city,
-               salary_min, salary_max, salary_currency, matched_chunk, distance
+               salary_min, salary_max, salary_currency, work_mode, matched_chunk, distance
         from (
           select distinct on (v.id)
             v.id as id, v.source as source, v.title as title, v.company as company,
             v.url as url, v.published_at as published_at, v.city as city,
             v.salary_min as salary_min, v.salary_max as salary_max,
-            v.salary_currency as salary_currency,
+            v.salary_currency as salary_currency, v.work_mode as work_mode,
             c.content as matched_chunk,
             (c.embedding <=> $1)
               + ${LEARNED_EXCLUDE_PENALTY} * (
@@ -125,7 +174,7 @@ export async function semanticSearch(
 export async function getVacancy(id: number): Promise<Vacancy | null> {
   const rows = await query<Vacancy>(
     `select id, source, title, company, description, url, published_at, city,
-            salary_min, salary_max, salary_currency
+            salary_min, salary_max, salary_currency, work_mode
      from vacancies where id = $1`,
     [id],
   );
@@ -142,7 +191,7 @@ export async function getVacancy(id: number): Promise<Vacancy | null> {
 export async function getVacancyByUrl(rawUrl: string): Promise<Vacancy | null> {
   const rows = await query<Vacancy>(
     `select id, source, title, company, description, url, published_at, city,
-            salary_min, salary_max, salary_currency
+            salary_min, salary_max, salary_currency, work_mode
      from vacancies
      where rtrim(url, '/') = rtrim($1, '/') and is_active = true
      order by last_seen_at desc
@@ -164,17 +213,19 @@ export async function getVacancyByUrl(rawUrl: string): Promise<Vacancy | null> {
 // looksLikeResume у route.ts), і НЕ зберігати в vacancies сторінку, яка
 // виявилась чиїмось резюме, а не вакансією.
 export async function storeExternalVacancy(page: Awaited<ReturnType<typeof fetchVacancyPage>>): Promise<Vacancy> {
+  const workMode = classifyWorkMode(page.title, page.text);
   const rows = await query<Vacancy>(
-    `insert into vacancies (source, external_id, keyword, title, company, description, url)
-     values ('external_link', null, 'external_link', $1, null, $2, $3)
+    `insert into vacancies (source, external_id, keyword, title, company, description, url, work_mode)
+     values ('external_link', null, 'external_link', $1, null, $2, $3, $4)
      on conflict (url) do update set
        title = excluded.title,
        description = excluded.description,
+       work_mode = excluded.work_mode,
        last_seen_at = now(),
        is_active = true
      returning id, source, title, company, description, url, published_at, city,
-               salary_min, salary_max, salary_currency`,
-    [page.title.slice(0, 300), page.text, page.finalUrl],
+               salary_min, salary_max, salary_currency, work_mode`,
+    [page.title.slice(0, 300), page.text, page.finalUrl, workMode],
   );
   return rows[0];
 }
@@ -193,12 +244,13 @@ export async function upsertExternalVacancy(rawUrl: string): Promise<Vacancy> {
 // не видав), унікальність не потрібна — кожна вставка створює новий запис.
 export async function upsertVacancyFromText(title: string, text: string): Promise<Vacancy> {
   const syntheticUrl = `pasted://${randomUUID()}`;
+  const workMode = classifyWorkMode(title, text);
   const rows = await query<Vacancy>(
-    `insert into vacancies (source, external_id, keyword, title, company, description, url)
-     values ('pasted_text', null, 'pasted_text', $1, null, $2, $3)
+    `insert into vacancies (source, external_id, keyword, title, company, description, url, work_mode)
+     values ('pasted_text', null, 'pasted_text', $1, null, $2, $3, $4)
      returning id, source, title, company, description, url, published_at, city,
-               salary_min, salary_max, salary_currency`,
-    [title.slice(0, 300), text.slice(0, 12000), syntheticUrl],
+               salary_min, salary_max, salary_currency, work_mode`,
+    [title.slice(0, 300), text.slice(0, 12000), syntheticUrl, workMode],
   );
   return rows[0];
 }

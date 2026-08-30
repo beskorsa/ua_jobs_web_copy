@@ -444,6 +444,30 @@ button:disabled {
   font-weight: 600;
 }
 
+.vacancy-card__work-mode {
+  display: inline-block;
+  margin: 0 6px 8px 0;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.vacancy-card__work-mode--remote {
+  color: #1a9e5c;
+  background: rgba(26, 158, 92, 0.12);
+}
+
+.vacancy-card__work-mode--office {
+  color: #b5761c;
+  background: rgba(181, 118, 28, 0.12);
+}
+
+.vacancy-card__work-mode--hybrid {
+  color: #6a5acd;
+  background: rgba(106, 90, 205, 0.12);
+}
+
 .vacancy-card__snippet {
   margin: 0;
   color: var(--text-faint);

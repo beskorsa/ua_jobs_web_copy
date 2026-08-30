@@ -47,6 +47,17 @@ export async function ensureSchema(): Promise<void> {
   `);
   await query("create index if not exists idx_vacancies_active on vacancies (is_active);");
 
+  // work_mode — 'remote' | 'office' | 'hybrid' | null (невідомо/не вдалось
+  // розпізнати). Раніше "віддалено/офіс" був лише неявним сигналом у
+  // semantic search (embedding міг збігтись чи ні) — картка вакансії ніяк
+  // цього не показувала, тож користувач не міг з першого погляду відрізнити
+  // remote-вакансію від суто офісної. Заповнюється: парсером (evristika по
+  // title+description, див. ua_jobs_parser/scrapers/base.py
+  // classify_work_mode) для вакансій з нічного скрейпу; на веб-стороні —
+  // classifyWorkMode() у vacancies.ts для посилань/вставленого тексту з чату
+  // (analyze_vacancy_link/analyze_vacancy_text), які йдуть повз парсер.
+  await query(`alter table vacancies add column if not exists work_mode text;`);
+
   await query(`
     create table if not exists vacancy_chunks (
       id           bigint generated always as identity primary key,

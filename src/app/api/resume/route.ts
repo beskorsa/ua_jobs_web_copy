@@ -11,13 +11,10 @@ import { getOrCreateUserId } from "@/lib/user";
 import {
   extractResumeText,
   looksLikeResume,
-  summarizeResume,
-  upsertResume,
-  storeResumeEmbedding,
-  matchVacanciesForResume,
   hashResumeText,
   findResumeByUserAndHash,
-  saveResumeSummary,
+  matchVacanciesForResume,
+  ingestResumeText,
   RESUME_MIME_TYPES,
   resumeFileTypeFromName,
 } from "@/lib/resumes";
@@ -93,18 +90,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const resumeId = await upsertResume(userId, file.name, text, contentHash);
-    await storeResumeEmbedding(resumeId, text, userId);
-
-    const [summary, results] = await Promise.all([
-      summarizeResume(text, userId),
-      matchVacanciesForResume(resumeId, text, 15, userId),
-    ]);
-    await saveResumeSummary(resumeId, summary);
-
+    const { resumeId, summary, results, alreadyKnown } = await ingestResumeText(userId, file.name, text);
     await logSearchQuery(userId, "resume", summary, results.length);
 
-    return NextResponse.json({ resumeId, summary, results, alreadyKnown: false });
+    return NextResponse.json({ resumeId, summary, results, alreadyKnown });
   } catch (e: any) {
     console.error("[api/resume]", e);
     return NextResponse.json({ error: e.message ?? String(e) }, { status: 500 });

@@ -53,7 +53,27 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const busy = searching || uploading || chatBusy;
-  const isUrl = /^https?:\/\/\S+$/i.test(query.trim());
+  // Люди часто копіюють посилання з адресного рядка без "https://"
+  // (наприклад "www.work.ua/resumes/9229269/") — стара перевірка вимагала
+  // протокол явно і просто відкидала такий ввід на клієнті, ще ДО того, як
+  // запит взагалі йшов на сервер (і туди, де тепер стоїть AI-перевірка типу
+  // контенту). Тепер додатково приймаємо "схоже на домен" без протоколу.
+  const looksLikeUrlWithoutProtocol = /^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(query.trim());
+  const isUrl = /^https?:\/\/\S+$/i.test(query.trim()) || looksLikeUrlWithoutProtocol;
+  const normalizedQueryUrl = /^https?:\/\//i.test(query.trim()) ? query.trim() : `https://${query.trim()}`;
+
+  // Чат тепер теж може розпізнати "це насправді ваше резюме" (лінк чи
+  // вставлений текст, через analyze_vacancy_link/analyze_vacancy_text у
+  // /api/chat) і одразу підібрати вакансії — сервер тоді повертає той самий
+  // resumeId/summary, що і /api/resume при завантаженні файлу. Підхоплюємо
+  // це в React-стан, щоб наступні "cover letter"/"поради" вже знали про це
+  // резюме, а кнопка завантаження показувала стан "вже є".
+  function applyResumeFromResponse(data: { resumeId?: number; summary?: string }) {
+    if (data.resumeId) {
+      setResumeId(data.resumeId);
+      if (data.summary) setResumeSummary(data.summary);
+    }
+  }
 
   function pushError(err: unknown) {
     const text = err instanceof Error ? err.message : String(err);
@@ -80,7 +100,7 @@ export default function Home() {
       return;
     }
 
-    await submitLink(q);
+    await submitLink(normalizedQueryUrl);
   }
 
   // Пошук за тегами (ключові / мінус-слова) — окрема від головного поля
@@ -141,6 +161,7 @@ export default function Home() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       if (data.results) setVacancies(data.results);
+      applyResumeFromResponse(data);
       setMessages((m) => [
         ...m,
         {
@@ -217,6 +238,7 @@ export default function Home() {
       if (data.error) throw new Error(data.error);
 
       if (data.results) setVacancies(data.results);
+      applyResumeFromResponse(data);
 
       setMessages((m) => [
         ...m,

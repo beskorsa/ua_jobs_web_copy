@@ -234,6 +234,46 @@ export async function storeResumeEmbedding(
   );
 }
 
+export type IngestedResume = {
+  resumeId: number;
+  summary: string;
+  results: VacancyResult[];
+  alreadyKnown: boolean;
+};
+
+/**
+ * Спільний конвеєр "у нас є текст резюме — зберегти й підібрати вакансії",
+ * використовується і /api/resume (файл PDF/DOCX), і чатом (коли людина
+ * прислала лінк/текст свого резюме замість вакансії — classifyLinkContent
+ * у generate.ts вже визначив, що це резюме, тому тут перевірку не дублюємо).
+ * Дедуп за хешем тексту — щоб той самий текст резюме, надісланий вдруге
+ * (файлом чи лінком), не гонявся через embedding+сумаризацію повторно.
+ */
+export async function ingestResumeText(
+  userId: string,
+  filename: string,
+  text: string,
+): Promise<IngestedResume> {
+  const contentHash = hashResumeText(text);
+
+  const existing = await findResumeByUserAndHash(userId, contentHash);
+  if (existing) {
+    const results = await matchVacanciesForResume(existing.id, text, 15, userId);
+    return { resumeId: existing.id, summary: existing.summary ?? "", results, alreadyKnown: true };
+  }
+
+  const resumeId = await upsertResume(userId, filename, text, contentHash);
+  await storeResumeEmbedding(resumeId, text, userId);
+
+  const [summary, results] = await Promise.all([
+    summarizeResume(text, userId),
+    matchVacanciesForResume(resumeId, text, 15, userId),
+  ]);
+  await saveResumeSummary(resumeId, summary);
+
+  return { resumeId, summary, results, alreadyKnown: false };
+}
+
 export async function matchVacanciesForResume(
   resumeId: number,
   resumeText: string,

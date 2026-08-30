@@ -15,8 +15,8 @@ import {
   type Vacancy,
 } from "@/lib/vacancies";
 import { fetchVacancyPage } from "@/lib/fetchExternalVacancy";
-import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy } from "@/lib/generate";
-import { resolveOwnedResumeId, looksLikeResume } from "@/lib/resumes";
+import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy, classifyLinkContent } from "@/lib/generate";
+import { resolveOwnedResumeId, ingestResumeText } from "@/lib/resumes";
 import { query } from "@/lib/db";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
 import { logSearchQuery } from "@/lib/searchLog";
@@ -310,25 +310,43 @@ export async function POST(req: NextRequest) {
               vacancy = known;
               fromDb = true;
             } else {
-              // Люди плутають поле "посилання на вакансію" з посиланням на
-              // СВОЄ резюме (типовий приклад — публічна анкета work.ua/
-              // resumes/NNN/, вона не приватна, тож fetchVacancyPage успішно
-              // її завантажить). Без цієї перевірки чиєсь резюме зберігалось
-              // би в vacancies як ніби-вакансія — і псувало базу, і палило
-              // токени на подальший scoreVacancy. Перевіряємо ДО збереження.
+              // Люди плутають поле "посилання на вакансію" зі своїм резюме
+              // (типовий приклад — публічна анкета work.ua/resumes/NNN/, вона
+              // не приватна, тож fetchVacancyPage успішно її завантажить) —
+              // або взагалі шлють щось стороннє (статтю, документацію тощо).
+              // Без цієї перевірки будь-яке з них зберігалось би в vacancies
+              // як ніби-вакансія і псувало базу/палило токени на scoreVacancy.
               const page = await fetchVacancyPage(url);
-              const isResume = await looksLikeResume(page.text, userId);
-              if (isResume) {
+              const contentType = await classifyLinkContent(page.text, userId);
+
+              if (contentType === "resume") {
+                // Не просто відмовляємо — людина явно хотіла, щоб її резюме
+                // врахували, просто прислала його лінком, а не файлом. Той
+                // самий конвеєр, що і /api/resume: зберегти + підібрати
+                // вакансії, а не змушувати завантажувати файл вручну.
+                const ingested = await ingestResumeText(userId, page.title || url, page.text);
+                const intro = ingested.alreadyKnown
+                  ? "Це резюме вже є в базі — ми його пам'ятаємо, повторно не обробляли."
+                  : ingested.summary;
+                reply = `${intro}\n\nПідібрав ${ingested.results.length} вакансій під це резюме.`;
+                payload = { action: "search", results: ingested.results, resumeId: ingested.resumeId };
+                await query(`insert into chat_messages (user_id, role, content) values ($1, 'assistant', $2)`, [
+                  userId,
+                  reply,
+                ]);
+                return NextResponse.json({ reply, ...payload });
+              }
+              if (contentType === "other") {
                 reply =
-                  "Це схоже на посилання на резюме, а не на вакансію — сюди вставляйте посилання на " +
-                  "оголошення про роботу. Якщо хотіли, щоб я врахував ваше резюме, завантажте його файлом " +
-                  "через кнопку «Завантажити резюме» вище.";
+                  "Це посилання не схоже на вакансію (і не на резюме) — сюди вставляйте посилання саме " +
+                  "на оголошення про роботу.";
                 await query(`insert into chat_messages (user_id, role, content) values ($1, 'assistant', $2)`, [
                   userId,
                   reply,
                 ]);
                 return NextResponse.json({ reply });
               }
+
               vacancy = await storeExternalVacancy(page);
               fromDb = false;
             }
@@ -367,19 +385,36 @@ export async function POST(req: NextRequest) {
         } else {
           try {
             // Той самий випадок, що і з посиланням: людина може вставити
-            // сюди текст СВОГО резюме замість опису вакансії. Перевіряємо
-            // ДО збереження в vacancies і ДО scoreVacancy нижче.
-            const isResume = await looksLikeResume(text, userId);
-            if (isResume) {
-              reply =
-                "Це схоже на текст резюме, а не на опис вакансії. Якщо хотіли, щоб я врахував ваше резюме, " +
-                "завантажте його файлом через кнопку «Завантажити резюме» вище — вона саме для цього.";
+            // сюди текст СВОГО резюме (чи щось стороннє) замість опису
+            // вакансії. Перевіряємо ДО збереження в vacancies і ДО
+            // scoreVacancy нижче.
+            const contentType = await classifyLinkContent(text, userId);
+
+            if (contentType === "resume") {
+              // Так само, як з лінком: людина хотіла, щоб врахували резюме —
+              // просто вставила текст замість завантаження файлу. Обробляємо
+              // тим самим конвеєром, що і /api/resume.
+              const ingested = await ingestResumeText(userId, title, text);
+              const intro = ingested.alreadyKnown
+                ? "Це резюме вже є в базі — ми його пам'ятаємо, повторно не обробляли."
+                : ingested.summary;
+              reply = `${intro}\n\nПідібрав ${ingested.results.length} вакансій під це резюме.`;
+              payload = { action: "search", results: ingested.results, resumeId: ingested.resumeId };
+              await query(`insert into chat_messages (user_id, role, content) values ($1, 'assistant', $2)`, [
+                userId,
+                reply,
+              ]);
+              return NextResponse.json({ reply, ...payload });
+            }
+            if (contentType === "other") {
+              reply = "Це не схоже на опис вакансії — вставте текст конкретного оголошення про роботу.";
               await query(`insert into chat_messages (user_id, role, content) values ($1, 'assistant', $2)`, [
                 userId,
                 reply,
               ]);
               return NextResponse.json({ reply });
             }
+
             const vacancy = await upsertVacancyFromText(title, text);
             payload = { action: "search", results: [vacancy] };
             if (resumeId) {

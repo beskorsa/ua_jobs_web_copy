@@ -102,6 +102,43 @@ export async function getLatestResumeIdForUser(userId: string): Promise<number |
   return rows[0]?.id ?? null;
 }
 
+/**
+ * Резюме за id, ЛИШЕ якщо воно належить цьому user_id. resumes.id — звичайний
+ * bigint identity (1, 2, 3...), тобто легко перебираємий — раніше
+ * /api/cover-letter, /api/recommendations і /api/chat читали raw_text за
+ * будь-яким переданим клієнтом resumeId БЕЗ перевірки власника: будь-хто міг
+ * підставити чужий resumeId і отримати cover letter/поради, згенеровані з
+ * чужого резюме (ПІБ, місця роботи тощо просочувались через відповідь LLM).
+ * Це — виправлення: єдина крапка доступу до тексту резюме за id.
+ */
+export async function getResumeForUser(
+  resumeId: number,
+  userId: string,
+): Promise<{ id: number; raw_text: string } | null> {
+  const rows = await query<{ id: number; raw_text: string }>(
+    `select id, raw_text from resumes where id = $1 and user_id = $2`,
+    [resumeId, userId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * resumeId від клієнта (React-стан) довіряти не можна (див. getResumeForUser
+ * вище) — перевіряємо, що він реально належить цьому user_id, і лише тоді
+ * використовуємо; інакше (або якщо клієнт взагалі не передав resumeId)
+ * підхоплюємо останнє власне резюме користувача з бази.
+ */
+export async function resolveOwnedResumeId(
+  userId: string,
+  candidateId?: number | null,
+): Promise<number | null> {
+  if (candidateId) {
+    const owned = await getResumeForUser(candidateId, userId);
+    if (owned) return owned.id;
+  }
+  return getLatestResumeIdForUser(userId);
+}
+
 // Нормалізуємо (тримаємо тільки суттєві пробіли) перед хешем, щоб той самий
 // PDF, перезбережений/перезавантажений повторно (де можуть трохи розійтись
 // невидимі пробіли/переноси рядків від pdf-parse), все одно впізнавався як

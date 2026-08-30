@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ensureSchema } from "@/lib/schema";
 import { getOrCreateUserId } from "@/lib/user";
 import { getResumeImprovementTips } from "@/lib/generate";
-import { query } from "@/lib/db";
+import { getResumeForUser } from "@/lib/resumes";
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,12 +16,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "resumeId обов'язковий" }, { status: 400 });
     }
 
-    const rows = await query<{ raw_text: string }>(`select raw_text from resumes where id = $1`, [resumeId]);
-    if (!rows.length) {
+    // Звіряємо user_id — без цього будь-хто міг підставити чужий resumeId і
+    // отримати поради, згенеровані з чужого резюме (витік ПІБ/досвіду через
+    // відповідь LLM).
+    const resume = await getResumeForUser(Number(resumeId), userId);
+    if (!resume) {
       return NextResponse.json({ error: "Резюме не знайдено" }, { status: 404 });
     }
 
-    const tips = await getResumeImprovementTips(rows[0].raw_text, userId);
+    const tips = await getResumeImprovementTips(resume.raw_text, userId);
     return NextResponse.json({ tips });
   } catch (e: any) {
     console.error("[api/recommendations]", e);

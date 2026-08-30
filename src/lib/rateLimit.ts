@@ -13,15 +13,23 @@ import { query } from "./db";
  */
 export type RateLimitResult = { allowed: true } | { allowed: false; retryAfterSeconds: number };
 
-// Персональный обхід лімітів для власного тестування (Ліза) — без нього
+// Персональний обхід лімітів для власного тестування (Ліза) — без нього
 // кожен ручний тест (аплоад резюме, повторні запити в чат) з'їдає той самий
 // бюджет, що і в реальних користувачів, і швидко впирається в 429.
-// Значення — anonymous uid з httpOnly-cookie (див. lib/user.ts, DevTools →
-// Application → Cookies → uid). Це не секрет (просто випадковий UUID без
-// прав), тому зберігати його прямо в коді нормально.
-const RATE_LIMIT_BYPASS_USER_IDS = new Set<string>([
-  "7f4da38d-ecfc-4049-bb5c-695c69c829af",
-]);
+// Значення — anonymous uid з httpOnly-cookie (див. lib/user.ts). РАНІШЕ цей
+// uid лежав прямо тут у коді з коментарем "не секрет" — але це неправда:
+// код лежить у git-репозиторії, і будь-хто, хто його бачив (публічний
+// репозиторій, доступ до GitHub, будь-яка копія), міг просто виставити собі
+// cookie "uid" з таким самим значенням і отримати БЕЗЛІМІТНИЙ доступ до
+// пошуку/чату/резюме — тобто саме та накрутка OpenAI-рахунку, від якої
+// rate-limit і мав захищати. Тепер значення береться з env (ADMIN_BYPASS_USER_IDS,
+// кома-розділений список) — не потрапляє в git, задається в Vercel.
+const RATE_LIMIT_BYPASS_USER_IDS = new Set(
+  (process.env.ADMIN_BYPASS_USER_IDS ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean),
+);
 
 export async function checkRateLimit(
   userId: string,

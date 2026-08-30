@@ -8,7 +8,7 @@ import { getOpenAI, CHAT_MODEL, embedText } from "@/lib/openai";
 import { logTokenUsage } from "@/lib/tokenUsage";
 import { semanticSearch, getVacancy, getVacancyByUrl, upsertExternalVacancy, upsertVacancyFromText } from "@/lib/vacancies";
 import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy } from "@/lib/generate";
-import { getLatestResumeIdForUser } from "@/lib/resumes";
+import { resolveOwnedResumeId } from "@/lib/resumes";
 import { query } from "@/lib/db";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
 import { logSearchQuery } from "@/lib/searchLog";
@@ -140,8 +140,12 @@ export async function POST(req: NextRequest) {
     // PDF цього разу не вдалось. userId — стабільний cookie, тож якщо
     // клієнт не передав resumeId, підхоплюємо останнє успішно завантажене
     // резюме цього user_id з бази — це і є "пам'ять" між повідомленнями.
+    // resolveOwnedResumeId ОБОВ'ЯЗКОВО звіряє, що переданий клієнтом
+    // resumeId належить саме цьому user_id (bigint id легко перебираємий —
+    // без цієї перевірки будь-хто міг підставити чужий resumeId і отримати
+    // cover letter/поради з чужого резюме).
     const resumeId: number | undefined =
-      body.resumeId || (await getLatestResumeIdForUser(userId)) || undefined;
+      (await resolveOwnedResumeId(userId, body.resumeId ? Number(body.resumeId) : undefined)) ?? undefined;
 
     if (!message || !message.trim()) {
       return NextResponse.json({ error: "Порожнє повідомлення" }, { status: 400 });

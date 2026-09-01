@@ -40,29 +40,18 @@ function trimSnippet(text: string, maxLen = 160): string {
   return (lastSpace > maxLen * 0.6 ? cut.slice(0, lastSpace) : cut).trim() + "…";
 }
 
-// Джерела, для яких немає власної індексованої сторінки /vacancies/[id]
-// (розовий текст, вставлений вручну, чи разово розібране посилання) — див.
-// PUBLIC_LISTING_EXCLUDED_SOURCES у lib/vacancies.ts. Тримаємо той самий
-// список тут же (без імпорту серверного lib у клієнтський компонент), щоб
-// для таких карток лишити пряме посилання на оригінал, а не на 404.
-const NO_INTERNAL_PAGE_SOURCES = new Set(["pasted_text", "external_link"]);
-
 export function VacancyCard({ vacancy, index }: { vacancy: VacancyCardData; index?: number }) {
   const salary =
     vacancy.salary_min || vacancy.salary_max
       ? `${vacancy.salary_min ?? "?"}–${vacancy.salary_max ?? "?"} ${vacancy.salary_currency ?? ""}`
       : null;
 
-  // Для вакансій з реальних джерел скрейпера ведемо на власну сторінку
-  // /vacancies/{id} (SSR + JobPosting-розмітка для Google) — вона вже сама
-  // містить кнопку переходу на оригінал. Для разово розібраних посилань чи
-  // вставленого тексту такої сторінки немає — лишаємо прямий зовнішній лінк.
-  const isInternal = vacancy.source ? !NO_INTERNAL_PAGE_SOURCES.has(vacancy.source) : false;
-  const href = isInternal ? `/vacancies/${vacancy.id}` : vacancy.url;
-  const linkProps = isInternal ? {} : { target: "_blank", rel: "noreferrer" };
+  // Сайт — SPA-чат, окремої сторінки /vacancies/{id} немає (див. sitemap.ts),
+  // тож для будь-якого джерела ведемо напряму на оригінал вакансії.
+  const href = vacancy.url;
 
   return (
-    <a href={href} {...linkProps} className="vacancy-card">
+    <a href={href} target="_blank" rel="noreferrer" className="vacancy-card">
       {index != null && <span className="vacancy-card__index">#{index}</span>}
       <h3>{vacancy.title}</h3>
       <p className="vacancy-card__meta">

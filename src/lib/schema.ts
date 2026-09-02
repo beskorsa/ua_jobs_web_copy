@@ -22,7 +22,15 @@ let ensured = false;
 export async function ensureSchema(): Promise<void> {
   if (ensured) return;
 
-  await query("create extension if not exists vector;");
+  // schema extensions — не public: розширення в public-схемі PostgREST
+  // автоматично виставляє в публічний API (Supabase Security Advisor,
+  // "Extension in Public"). "extensions" вже є в дефолтному search_path
+  // Supabase ("$user", public, extensions), тож тип vector/оператори
+  // (<=>, <->) лишаються доступні без будь-яких змін у запитах.
+  // IF NOT EXISTS перевіряє тільки ім'я розширення, не схему — тож на вже
+  // існуючій базі, де vector стоїть у extensions (перенесли вручну), цей
+  // рядок нічого не робить і не намагається переставити його назад.
+  await query("create extension if not exists vector with schema extensions;");
 
   await query(`
     create table if not exists vacancies (

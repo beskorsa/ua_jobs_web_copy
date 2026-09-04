@@ -118,7 +118,11 @@ const SYSTEM_PROMPT =
   "зацікавила можливість», «я захоплююсь X», без переказу пунктів резюме як списку досягнень. " +
   "Три варіанти мають реально відрізнятись акцентом: (1) на конкретному результаті/проєкті з резюме; " +
   "(2) на технічному стеку, що збігається з вимогами вакансії; (3) на домені/продукті компанії з " +
-  "вакансії, який реально резонує з досвідом користувача. Пиши тією ж мовою, що і текст вакансії.";
+  "вакансії, який реально резонує з досвідом користувача. Пиши тією ж мовою, що і текст вакансії.\n\n" +
+  "Якщо користувач додав ОКРЕМІ побажання до cover letter (довжина, тон, що прибрати/додати тощо) — " +
+  "вони наведені нижче в блоці «Побажання користувача до cover letter» і мають ПРІОРИТЕТ над " +
+  "стандартними правилами вище (в т.ч. над довжиною 5-8 речень — якщо просять коротше, зроби " +
+  "справді помітно коротше, а не косметично переформулюй той самий текст).";
 
 export type GenerationResult = {
   relevance: number;
@@ -130,8 +134,10 @@ export async function scoreVacancy(
   resumeText: string,
   vacancy: Pick<Vacancy, "title" | "company" | "description">,
   userId?: string | null,
+  instructions?: string,
 ): Promise<GenerationResult> {
   const openai = getOpenAI();
+  const trimmedInstructions = instructions?.trim();
   const resp = await openai.chat.completions.create({
     model: CHAT_MODEL,
     temperature: 0.4,
@@ -143,7 +149,10 @@ export async function scoreVacancy(
         content:
           `### Резюме кандидата\n${resumeText.trim()}\n\n` +
           `### Вакансія\nПосада: ${vacancy.title}\nКомпанія: ${vacancy.company ?? "—"}\n` +
-          `Опис:\n${(vacancy.description ?? "").trim()}`,
+          `Опис:\n${(vacancy.description ?? "").trim()}` +
+          (trimmedInstructions
+            ? `\n\n### Побажання користувача до cover letter\n${trimmedInstructions}`
+            : ""),
       },
     ],
   });

@@ -6,7 +6,10 @@
 
 import { Agent } from "undici";
 import { lookup as dnsLookup, type LookupOptions } from "node:dns";
+import { promisify } from "node:util";
 import net from "node:net";
+
+const dnsLookupAsync = promisify(dnsLookup);
 
 const BLOCKED_HOSTNAMES = new Set(["localhost", "0.0.0.0", "::1", "metadata.google.internal"]);
 
@@ -149,6 +152,68 @@ export type FetchedVacancyPage = { title: string; text: string; finalUrl: string
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_BYTES = 3 * 1024 * 1024;
 const MAX_TEXT_CHARS = 8000;
+const BROWSER_TIMEOUT_MS = 20_000;
+
+// Той самий SSRF-захист, що й для fetch() (isPrivateHostname/ssrfSafeLookup),
+// але для Playwright — окрема перевірка, бо браузер не дає підмінити lookup
+// на кожен hop, як undici. TOCTOU-вікно тут ширше (DNS резолвиться тут, а
+// підключається сама сторінка Chromium трохи пізніше) — прийнятно для
+// внутрішнього інструменту з rate-limit, але не для довільного untrusted-
+// трафіку. Кидає, якщо жодна резолвнута адреса не є публічною.
+async function assertHostnameResolvesPublicly(hostname: string): Promise<void> {
+  if (net.isIP(hostname)) {
+    if (isPrivateIp(hostname)) throw new Error("SSRF protection");
+    return;
+  }
+  const addresses = await dnsLookupAsync(hostname, { all: true });
+  const list = addresses as unknown as { address: string; family: number }[];
+  if (!list.length || list.every((a) => isPrivateIp(a.address))) {
+    throw new Error("SSRF protection");
+  }
+}
+
+// Фолбек, коли звичайний fetch() ловить 403/429 (бот-захист по заголовках/
+// TLS-фінгерпринту) — той самий випадок, який ua_jobs_parser (Playwright,
+// справжній Chromium) читає без проблем: реальний браузер виконує JS,
+// проходить Cloudflare-челлендж і має TLS-відбиток звичайного Chrome, чого
+// підробленими заголовками в голому HTTP-запиті не досягти. Використовується
+// ЛИШЕ як другий рубіж (fetchVacancyPage викликає це сам після 403/429) —
+// піднімати Chromium на кожен лінк дорожче й повільніше за звичайний fetch.
+async function fetchViaBrowser(url: URL): Promise<FetchedVacancyPage> {
+  await assertHostnameResolvesPublicly(url.hostname);
+
+  // Динамічний import — playwright важкий (сам пакет + бінарник Chromium),
+  // не тягнемо його в кожен серверless-бандл модуля заради шляху, який
+  // спрацьовує лише як фолбек на 403.
+  const { chromium } = await import("playwright");
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      locale: "uk-UA",
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(BROWSER_TIMEOUT_MS);
+    await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: BROWSER_TIMEOUT_MS });
+    // Даємо час можливому Cloudflare/JS-челленджу відпрацювати й
+    // перенаправити на справжню сторінку, перш ніж читати контент.
+    await page.waitForTimeout(1500);
+
+    const finalUrl = page.url();
+    const title = decodeEntities((await page.title()) || url.hostname).trim();
+    const html = await page.content();
+    const text = htmlToText(html).slice(0, MAX_TEXT_CHARS);
+    if (!text) {
+      throw new Error("Не вдалось витягти текст зі сторінки");
+    }
+    return { title: title || url.hostname, text, finalUrl: finalUrl || url.toString() };
+  } finally {
+    await browser.close();
+  }
+}
 
 export async function fetchVacancyPage(rawUrl: string): Promise<FetchedVacancyPage> {
   let url: URL;
@@ -223,10 +288,15 @@ export async function fetchVacancyPage(rawUrl: string): Promise<FetchedVacancyPa
 
   if (!res.ok) {
     if (res.status === 403 || res.status === 429) {
-      throw new Error(
-        `Сайт заблокував автоматичне завантаження сторінки (${res.status}). ` +
-          "Спробуйте скопіювати текст вакансії вручну і надіслати його в чат.",
-      );
+      try {
+        return await fetchViaBrowser(url);
+      } catch (browserErr: any) {
+        throw new Error(
+          `Сайт заблокував автоматичне завантаження сторінки (${res.status}), і резервний спосіб через ` +
+            `браузер теж не спрацював (${browserErr?.message ?? browserErr}). ` +
+            "Спробуйте скопіювати текст вакансії вручну і надіслати його в чат.",
+        );
+      }
     }
     throw new Error(`Сторінка повернула помилку ${res.status}`);
   }

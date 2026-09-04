@@ -186,13 +186,26 @@ export async function fetchVacancyPage(rawUrl: string): Promise<FetchedVacancyPa
       dispatcher: ssrfSafeDispatcher,
       headers: {
         // Деякі сайти (work.ua тощо) віддають 403 будь-якому UA, що не
-        // виглядає як звичайний браузер — кастомний бот-рядок і мінімум
-        // заголовків тут не проходили. Видаємо себе за звичайний Chrome.
+        // виглядає як звичайний браузер. Одного лише User-Agent виявилось
+        // замало (403 лишався) — бот-захист дивиться на набір заголовків
+        // разом (sec-ch-ua/Sec-Fetch-*/Referer теж перевіряються, справжній
+        // Chrome завжди шле їх усі одночасно), тож імітуємо повний набір,
+        // який реальний браузер надсилає при переході за посиланням.
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
           "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "uk-UA,uk;q=0.9,ru;q=0.8,en;q=0.7",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        Referer: `${url.protocol}//${url.hostname}/`,
       },
     });
   } catch (e: any) {

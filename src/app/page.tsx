@@ -26,6 +26,14 @@ const INTRO =
   "для аналізу, або завантажте резюме (PDF) — підберу вакансії під нього. Після цього тут " +
   "з'явиться чат: можна буде попросити cover letter, поради по резюме або запитати про вакансію.";
 
+// Дзеркало DB_SCOPE_NOTICE/LOW_RESULTS_THRESHOLD у api/chat/route.ts — та
+// сама межа покриття бази (парсер скрейпить лише обмежений набір ключових
+// слів, див. коментар там), але тут для пошуку за тегами (не через чат-тул).
+const DB_SCOPE_NOTICE =
+  "Наразі в базі здебільшого вакансії з автоматизації бізнес-процесів та AI/LLM — за іншими " +
+  "напрямками (менеджмент, HR, адміністрування тощо) результатів може бути мало або зовсім не бути.";
+const LOW_RESULTS_THRESHOLD = 3;
+
 function TypingBubble() {
   return (
     <div className="chat__bubble chat__bubble--assistant chat__bubble--typing" aria-label="Асистент друкує">
@@ -124,10 +132,12 @@ export default function Home() {
       const label = minusKeywords.length
         ? `${keywords.join(", ")} (виключити: ${minusKeywords.join(", ")})`
         : keywords.join(", ");
+      const count = data.results.length;
+      const notice = count < LOW_RESULTS_THRESHOLD ? ` ${DB_SCOPE_NOTICE}` : "";
       setMessages((m) => [
         ...m,
         { role: "user", content: label },
-        { role: "assistant", content: `Знайшов ${data.results.length} вакансій.`, vacancies: data.results },
+        { role: "assistant", content: `Знайшов ${count} вакансій.${notice}`, vacancies: data.results },
       ]);
       setStarted(true);
     } catch (err) {

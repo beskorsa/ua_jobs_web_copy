@@ -139,6 +139,22 @@ const TOOLS: ChatCompletionTool[] = [
   },
 ];
 
+// Парсер (ua_jobs_parser/keywords.csv + watchdog.py) реально скрейпить лише
+// вакансії за обмеженим набором ключових слів (автоматизація бізнес-процесів,
+// AI/LLM тощо) — тому пошук за іншими напрямками (менеджмент, HR,
+// адміністрування, "cto", "warehouse manager" тощо, див. search_keywords у
+// базі) закономірно дає мало/нуль результатів, і без пояснення це виглядає
+// як баг пошуку, а не як межа покриття бази. Показуємо це користувачу прямо
+// в відповіді, а не мовчки повертаємо порожній список.
+const DB_SCOPE_NOTICE =
+  "Наразі в базі здебільшого вакансії з автоматизації бізнес-процесів та AI/LLM — за іншими " +
+  "напрямками (менеджмент, HR, адміністрування тощо) результатів може бути мало або зовсім не бути.";
+const LOW_RESULTS_THRESHOLD = 3;
+
+function lowCoverageNotice(resultCount: number): string {
+  return resultCount < LOW_RESULTS_THRESHOLD ? ` ${DB_SCOPE_NOTICE}` : "";
+}
+
 type ShownVacancy = { id: number; title: string };
 
 export async function POST(req: NextRequest) {
@@ -277,8 +293,8 @@ export async function POST(req: NextRequest) {
         await logSearchQuery(userId, "chat", q, results.length);
         payload = { action: "search", results };
         reply = results.length
-          ? `Знайшов ${results.length} вакансій за запитом «${q}».`
-          : `Нічого не знайшов за запитом «${q}» — спробуйте інші ключові слова.`;
+          ? `Знайшов ${results.length} вакансій за запитом «${q}».${lowCoverageNotice(results.length)}`
+          : `Нічого не знайшов за запитом «${q}». ${DB_SCOPE_NOTICE}`;
       } else if (toolCall.function.name === "cover_letter") {
         const idx = Number(args.vacancyIndex) - 1;
         const target = shownVacancies[idx];

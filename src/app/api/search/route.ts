@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { embedText } from "@/lib/openai";
 import { semanticSearch, isQueryWithinScrapedScope } from "@/lib/vacancies";
+import { filterRelevantVacanciesByQuery } from "@/lib/generate";
 import { ensureSchema } from "@/lib/schema";
 import { getOrCreateUserId } from "@/lib/user";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
@@ -65,9 +66,13 @@ export async function POST(req: NextRequest) {
     // все одно поверне topK "найближчих" рядків, навіть якщо жоден не
     // релевантний (limit завжди заповнюється), тож чесніше нічого не
     // показувати, ніж 30 випадкових вакансій поруч із попередженням.
-    const results = inScope
+    const rawResults = inScope
       ? await semanticSearch(vec, topK, minusKeywords, learnedExclusions)
       : [];
+    // Другий прохід LLM (див. коментар у filterRelevantVacanciesByQuery) —
+    // відсіює те, що потрапило в топ лише через збіг загальних слів у
+    // векторі, а не за суттю запиту.
+    const results = await filterRelevantVacanciesByQuery(queryText, rawResults, topK, userId);
 
     const logLabel = minusKeywords.length ? `${queryText} (-${minusKeywords.join(", -")})` : queryText;
     await logSearchQuery(userId, "search", logLabel, results.length);

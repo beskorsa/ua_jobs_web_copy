@@ -16,7 +16,7 @@ import {
   type Vacancy,
 } from "@/lib/vacancies";
 import { fetchVacancyPage } from "@/lib/fetchExternalVacancy";
-import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy, classifyLinkContent } from "@/lib/generate";
+import { scoreVacancy, saveGeneration, getResumeImprovementTips, answerAboutVacancy, classifyLinkContent, filterRelevantVacanciesByQuery } from "@/lib/generate";
 import { resolveOwnedResumeId, ingestResumeText, cleanResumeText } from "@/lib/resumes";
 import { query } from "@/lib/db";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
@@ -296,7 +296,11 @@ export async function POST(req: NextRequest) {
         // 30 "найближчих" записів, навіть якщо жоден не релевантний
         // (topK завжди заповнюється), і раніше це виглядало як "знайшов 30
         // вакансій" з купою сміття попри чесне попередження нижче.
-        const results = inScope ? await semanticSearch(vec, 30) : [];
+        const rawResults = inScope ? await semanticSearch(vec, 30) : [];
+        // Другий прохід LLM — відсіює те, що потрапило в топ лише через
+        // збіг загальних слів у векторі, а не за суттю запиту (див.
+        // коментар у filterRelevantVacanciesByQuery).
+        const results = await filterRelevantVacanciesByQuery(q, rawResults, 30, userId);
         await logSearchQuery(userId, "chat", q, results.length);
         payload = { action: "search", results };
         const notice = inScope ? "" : ` ${DB_SCOPE_NOTICE}`;

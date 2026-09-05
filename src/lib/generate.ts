@@ -297,6 +297,75 @@ export async function filterRelevantVacancies(
   return ranked.slice(0, maxResults);
 }
 
+// Той самий другий прохід (LLM-відсів після векторного пошуку), що і
+// filterRelevantVacanciesByQuery вище, — але для звичайного пошуку за
+// ключовими словами/чат-запитом, а не за резюме. isQueryWithinScrapedScope
+// ловить лише "запит взагалі поза тим, що скрейпили" (напр. "прибиральниця"),
+// але не рятує від того, що семантичний пошук ВСЕРЕДИНІ бази теж не
+// ідеальний: "hr" піднімає і HR-менеджера, і рекрутера, і випадковий
+// office-менеджер, якщо вектор ліг близько лише через загальні слова. Тут
+// LLM дивиться на сам запит і короткий список кандидатів та лишає тільки
+// ті, що дійсно відповідають запиту по суті (професія/сфера), а не за
+// випадковим збігом слів у векторі.
+export async function filterRelevantVacanciesByQuery(
+  queryText: string,
+  candidates: VacancyResult[],
+  maxResults = 15,
+  userId?: string | null,
+): Promise<VacancyResult[]> {
+  if (!candidates.length) return [];
+
+  const openai = getOpenAI();
+  const listing = candidates
+    .map(
+      (c) =>
+        `id=${c.id} | ${c.title}${c.company ? ` — ${c.company}` : ""}\n` +
+        `${c.matched_chunk.slice(0, 300).trim()}`,
+    )
+    .join("\n\n");
+
+  const resp = await openai.chat.completions.create({
+    model: CHAT_MODEL,
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "Ти — асистент пошуку вакансій. Тобі дають пошуковий запит користувача і список " +
+          "вакансій-кандидатів, знайдених семантичним (векторним) пошуком — серед них трапляються " +
+          "нерелевантні: інша професія чи сфера, які потрапили в список лише через збіг загальних " +
+          "слів у векторі. Твоя задача — залишити ТІЛЬКИ ті вакансії, які дійсно відповідають " +
+          "запиту користувача по суті (професія/сфера/навички), а не за випадковим текстовим " +
+          "збігом. Не бійся відкинути більшість — краще показати мало влучних вакансій, ніж багато " +
+          "випадкових.\n\n" +
+          'Відповідай ЛИШЕ JSON {"relevant_ids": [id, id, ...]} — id вакансій, які варто показати, ' +
+          "у порядку спадання релевантності (найкраща перша). Якщо жодна не підходить — порожній масив.",
+      },
+      {
+        role: "user",
+        content: `### Пошуковий запит\n${queryText}\n\n### Вакансії-кандидати\n${listing}`,
+      },
+    ],
+  });
+  await logTokenUsage("relevance_filter", CHAT_MODEL, resp.usage, userId);
+
+  const raw = resp.choices[0].message.content || "{}";
+  let data: any;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    // LLM повернула не-JSON — не ламаємо пошук, показуємо як є (перші за
+    // векторною відстанню), просто без додаткового відсіву.
+    return candidates.slice(0, maxResults);
+  }
+
+  const ids: number[] = Array.isArray(data.relevant_ids) ? data.relevant_ids.map((x: unknown) => Number(x)) : [];
+  const byId = new Map(candidates.map((c) => [Number(c.id), c]));
+  const ranked = ids.map((id) => byId.get(id)).filter((c): c is VacancyResult => Boolean(c));
+  return ranked.slice(0, maxResults);
+}
+
 export async function getResumeImprovementTips(
   resumeText: string,
   userId?: string | null,

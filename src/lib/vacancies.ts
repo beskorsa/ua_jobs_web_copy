@@ -235,7 +235,10 @@ async function getDomainWords(): Promise<Set<string>> {
   const words = new Set<string>();
   for (const row of rows) {
     for (const w of (row.keyword ?? "").toLowerCase().split(/[^a-zа-яіїєґ0-9]+/i)) {
-      if (w.length >= 3) words.add(w);
+      // >=2, не >=3 — багато IT-акронімів рівно 2 літери (ai, ml, hr, bi,
+      // qa, ux, pr) і губилися б повністю, зробивши "ai/ml" чи "hr" "поза
+      // охопленням бази" попри те, що це реальні скрейплені ключі.
+      if (w.length >= 2) words.add(w);
     }
   }
   domainWordsCache = words;
@@ -248,7 +251,7 @@ export async function isQueryWithinScrapedScope(queryText: string): Promise<bool
   const queryWords = queryText
     .toLowerCase()
     .split(/[^a-zа-яіїєґ0-9]+/i)
-    .filter((w) => w.length >= 3);
+    .filter((w) => w.length >= 2);
   return queryWords.some((qw) =>
     [...domainWords].some((dw) => dw === qw || dw.includes(qw) || qw.includes(dw)),
   );

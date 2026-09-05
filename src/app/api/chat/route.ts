@@ -287,13 +287,17 @@ export async function POST(req: NextRequest) {
 
       if (toolCall.function.name === "search_vacancies") {
         const q = String(args.query || message);
-        const vec = await embedText(q, "embed_chat_search", userId);
+        const [vec, inScope] = await Promise.all([
+          embedText(q, "embed_chat_search", userId),
+          isQueryWithinScrapedScope(q),
+        ]);
         const results = await semanticSearch(vec, 30);
         await logSearchQuery(userId, "chat", q, results.length);
         payload = { action: "search", results };
+        const notice = inScope ? "" : ` ${DB_SCOPE_NOTICE}`;
         reply = results.length
-          ? `Знайшов ${results.length} вакансій за запитом «${q}».${lowCoverageNotice(results.length)}`
-          : `Нічого не знайшов за запитом «${q}». ${DB_SCOPE_NOTICE}`;
+          ? `Знайшов ${results.length} вакансій за запитом «${q}».${notice}`
+          : `Нічого не знайшов за запитом «${q}».${notice || " Спробуйте інші ключові слова."}`;
       } else if (toolCall.function.name === "cover_letter") {
         const idx = Number(args.vacancyIndex) - 1;
         const target = shownVacancies[idx];

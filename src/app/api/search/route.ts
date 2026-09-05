@@ -57,9 +57,17 @@ export async function POST(req: NextRequest) {
     // Мінус-слова НЕ підмішуємо в текст для ембеддингу (це зіпсувало б сам
     // пошуковий вектор, притягуючи саме те, що треба виключити) — вони йдуть
     // окремим SQL-фільтром у semanticSearch.
-    const vec = await embedText(queryText, "embed_search", userId);
-    const results = await semanticSearch(vec, topK, minusKeywords, learnedExclusions);
-    const inScope = await isQueryWithinScrapedScope(queryText);
+    const [vec, inScope] = await Promise.all([
+      embedText(queryText, "embed_search", userId),
+      isQueryWithinScrapedScope(queryText),
+    ]);
+    // Поза словником скрейпленого — не показуємо semanticSearch: pgvector
+    // все одно поверне topK "найближчих" рядків, навіть якщо жоден не
+    // релевантний (limit завжди заповнюється), тож чесніше нічого не
+    // показувати, ніж 30 випадкових вакансій поруч із попередженням.
+    const results = inScope
+      ? await semanticSearch(vec, topK, minusKeywords, learnedExclusions)
+      : [];
 
     const logLabel = minusKeywords.length ? `${queryText} (-${minusKeywords.join(", -")})` : queryText;
     await logSearchQuery(userId, "search", logLabel, results.length);

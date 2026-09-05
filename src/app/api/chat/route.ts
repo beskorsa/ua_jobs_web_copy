@@ -291,7 +291,12 @@ export async function POST(req: NextRequest) {
           embedText(q, "embed_chat_search", userId),
           isQueryWithinScrapedScope(q),
         ]);
-        const results = await semanticSearch(vec, 30);
+        // Якщо запит поза словником реально скрейпленого (inScope=false) —
+        // не показуємо semanticSearch взагалі: pgvector все одно поверне
+        // 30 "найближчих" записів, навіть якщо жоден не релевантний
+        // (topK завжди заповнюється), і раніше це виглядало як "знайшов 30
+        // вакансій" з купою сміття попри чесне попередження нижче.
+        const results = inScope ? await semanticSearch(vec, 30) : [];
         await logSearchQuery(userId, "chat", q, results.length);
         payload = { action: "search", results };
         const notice = inScope ? "" : ` ${DB_SCOPE_NOTICE}`;

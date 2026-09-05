@@ -215,6 +215,45 @@ export async function semanticSearch(
   return query<VacancyResult>(sql, params);
 }
 
+// pgvector `order by distance limit topK` ЗАВЖДИ повертає topK найближчих
+// рядків, навіть якщо найближчі все одно нерелевантні — тому кількість
+// результатів НЕ показник того, чи запит взагалі в межах того, що скрейпить
+// парсер (напр. запит "hr" повертає 30 hr-подібних вакансій лише тому, що
+// вони найближчі З ТОГО, ЩО Є в базі, а не тому, що дійсно релевантні).
+// Натомість звіряємось з РЕАЛЬНИМ словником: vacancies.keyword — це
+// ключові слова, якими watchdog.py фактично скрейпив (див.
+// ua_jobs_parser/keywords.csv, дзеркало тут) — якщо жодне слово із запиту
+// користувача не перетинається з цим словником, вакансій за темою запиту
+// в базі закономірно нема/мало, і варто попередити про межі покриття.
+let domainWordsCache: Set<string> | null = null;
+
+async function getDomainWords(): Promise<Set<string>> {
+  if (domainWordsCache) return domainWordsCache;
+  const rows = await query<{ keyword: string | null }>(
+    `select distinct keyword from vacancies where keyword is not null`,
+  );
+  const words = new Set<string>();
+  for (const row of rows) {
+    for (const w of (row.keyword ?? "").toLowerCase().split(/[^a-zа-яіїєґ0-9]+/i)) {
+      if (w.length >= 3) words.add(w);
+    }
+  }
+  domainWordsCache = words;
+  return words;
+}
+
+export async function isQueryWithinScrapedScope(queryText: string): Promise<boolean> {
+  const domainWords = await getDomainWords();
+  if (!domainWords.size) return true; // словник ще порожній (свіжа база) — не блокуємо попередженням
+  const queryWords = queryText
+    .toLowerCase()
+    .split(/[^a-zа-яіїєґ0-9]+/i)
+    .filter((w) => w.length >= 3);
+  return queryWords.some((qw) =>
+    [...domainWords].some((dw) => dw === qw || dw.includes(qw) || qw.includes(dw)),
+  );
+}
+
 export async function getVacancy(id: number): Promise<Vacancy | null> {
   const rows = await query<Vacancy>(
     `select id, source, title, company, description, url, published_at, city,

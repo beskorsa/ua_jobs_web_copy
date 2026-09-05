@@ -26,13 +26,16 @@ const INTRO =
   "для аналізу, або завантажте резюме (PDF) — підберу вакансії під нього. Після цього тут " +
   "з'явиться чат: можна буде попросити cover letter, поради по резюме або запитати про вакансію.";
 
-// Дзеркало DB_SCOPE_NOTICE/LOW_RESULTS_THRESHOLD у api/chat/route.ts — та
-// сама межа покриття бази (парсер скрейпить лише обмежений набір ключових
-// слів, див. коментар там), але тут для пошуку за тегами (не через чат-тул).
+// Дзеркало DB_SCOPE_NOTICE у api/chat/route.ts — та сама межа покриття бази
+// (парсер скрейпить лише обмежений набір ключових слів, див. коментар там і
+// isQueryWithinScrapedScope у lib/vacancies.ts), але тут для пошуку за
+// тегами (не через чат-тул). inScope рахує сервер (звіряє запит зі
+// словником vacancies.keyword) — кількість результатів тут НЕ показник:
+// pgvector завжди повертає topK найближчих рядків, навіть якщо найближчі
+// все одно нерелевантні.
 const DB_SCOPE_NOTICE =
   "Наразі в базі здебільшого вакансії з автоматизації бізнес-процесів та AI/LLM — за іншими " +
-  "напрямками (менеджмент, HR, адміністрування тощо) результатів може бути мало або зовсім не бути.";
-const LOW_RESULTS_THRESHOLD = 3;
+  "напрямками (менеджмент, HR, адміністрування тощо) результати можуть бути нерелевантними.";
 
 function TypingBubble() {
   return (
@@ -133,7 +136,7 @@ export default function Home() {
         ? `${keywords.join(", ")} (виключити: ${minusKeywords.join(", ")})`
         : keywords.join(", ");
       const count = data.results.length;
-      const notice = count < LOW_RESULTS_THRESHOLD ? ` ${DB_SCOPE_NOTICE}` : "";
+      const notice = data.inScope === false ? ` ${DB_SCOPE_NOTICE}` : "";
       setMessages((m) => [
         ...m,
         { role: "user", content: label },

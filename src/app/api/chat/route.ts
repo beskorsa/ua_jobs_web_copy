@@ -12,6 +12,7 @@ import {
   getVacancyByUrl,
   storeExternalVacancy,
   upsertVacancyFromText,
+  isQueryWithinScrapedScope,
   type Vacancy,
 } from "@/lib/vacancies";
 import { fetchVacancyPage } from "@/lib/fetchExternalVacancy";
@@ -141,19 +142,17 @@ const TOOLS: ChatCompletionTool[] = [
 
 // Парсер (ua_jobs_parser/keywords.csv + watchdog.py) реально скрейпить лише
 // вакансії за обмеженим набором ключових слів (автоматизація бізнес-процесів,
-// AI/LLM тощо) — тому пошук за іншими напрямками (менеджмент, HR,
+// AI/LLM тощо) — тому запит за іншими напрямками (менеджмент, HR,
 // адміністрування, "cto", "warehouse manager" тощо, див. search_keywords у
-// базі) закономірно дає мало/нуль результатів, і без пояснення це виглядає
-// як баг пошуку, а не як межа покриття бази. Показуємо це користувачу прямо
-// в відповіді, а не мовчки повертаємо порожній список.
+// базі) закономірно не має релевантних вакансій у базі. Кількість
+// результатів тут НЕ показник: pgvector `order by distance limit topK`
+// завжди повертає topK найближчих рядків, навіть якщо найближчі все одно
+// нерелевантні (напр. запит "hr" повертає 30 hr-подібних вакансій просто
+// тому, що вони найближчі з того, що є). Тому звіряємось з isQueryWithin-
+// ScrapedScope (реальний словник vacancies.keyword), а не з results.length.
 const DB_SCOPE_NOTICE =
   "Наразі в базі здебільшого вакансії з автоматизації бізнес-процесів та AI/LLM — за іншими " +
-  "напрямками (менеджмент, HR, адміністрування тощо) результатів може бути мало або зовсім не бути.";
-const LOW_RESULTS_THRESHOLD = 3;
-
-function lowCoverageNotice(resultCount: number): string {
-  return resultCount < LOW_RESULTS_THRESHOLD ? ` ${DB_SCOPE_NOTICE}` : "";
-}
+  "напрямками (менеджмент, HR, адміністрування тощо) результати можуть бути нерелевантними.";
 
 type ShownVacancy = { id: number; title: string };
 

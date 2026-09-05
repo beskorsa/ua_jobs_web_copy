@@ -2,7 +2,7 @@ export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import { embedText } from "@/lib/openai";
-import { semanticSearch } from "@/lib/vacancies";
+import { semanticSearch, isQueryWithinScrapedScope } from "@/lib/vacancies";
 import { ensureSchema } from "@/lib/schema";
 import { getOrCreateUserId } from "@/lib/user";
 import { checkRateLimit, rateLimitResponseBody } from "@/lib/rateLimit";
@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
     // окремим SQL-фільтром у semanticSearch.
     const vec = await embedText(queryText, "embed_search", userId);
     const results = await semanticSearch(vec, topK, minusKeywords, learnedExclusions);
+    const inScope = await isQueryWithinScrapedScope(queryText);
 
     const logLabel = minusKeywords.length ? `${queryText} (-${minusKeywords.join(", -")})` : queryText;
     await logSearchQuery(userId, "search", logLabel, results.length);
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
       recordKeywordAssociations(keywords, minusKeywords),
     ]);
 
-    return NextResponse.json({ results, suggestedMinusKeywords: learnedExclusions });
+    return NextResponse.json({ results, suggestedMinusKeywords: learnedExclusions, inScope });
   } catch (e: any) {
     console.error("[api/search]", e);
     return NextResponse.json({ error: e.message ?? String(e) }, { status: 500 });

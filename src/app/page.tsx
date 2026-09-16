@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent, type ChangeEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ChangeEvent, type KeyboardEvent } from "react";
 import { VacancyList } from "@/components/VacancyList";
 import type { VacancyCardData } from "@/components/VacancyCard";
 import { TagInput } from "@/components/TagInput";
@@ -62,6 +62,31 @@ export default function Home() {
   const [chatBusy, setChatBusy] = useState(false);
   const [started, setStarted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Історія чату (chat_messages) весь час писалась на сервері, але фронт
+  // ніколи не читав її назад — messages стартував порожнім при кожному
+  // заході. Підвантажуємо один раз при монтуванні: якщо для цього uid
+  // (httpOnly cookie) є попередні повідомлення — показуємо їх замість INTRO.
+  // Картки вакансій/cover letter до старих повідомлень не прикріплені (у
+  // базі зберігається лише role+content) — це показує тільки текст реплік.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/chat")
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (Array.isArray(data.messages) && data.messages.length) {
+          setMessages(data.messages);
+          setStarted(true);
+        }
+      })
+      .catch(() => {
+        // мовчазний фолбек — просто лишається порожній чат з INTRO
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const busy = searching || uploading || chatBusy;
   // Люди часто копіюють посилання з адресного рядка без "https://"

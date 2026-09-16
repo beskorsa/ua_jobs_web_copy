@@ -239,5 +239,17 @@ export async function ensureSchema(): Promise<void> {
   await query("create index if not exists idx_token_usage_kind_created on token_usage (kind, created_at);");
   await query("create index if not exists idx_token_usage_created on token_usage (created_at);");
 
+  // Кеш курсів НБУ для конвертації зарплат у USD (див. src/lib/currency.ts) —
+  // одна строка на валюту (UAH-еквівалент за 1 одиницю). Живе в Postgres, а
+  // не тільки в пам'яті процесу, щоб курс переживав холодний старт
+  // serverless-функції і не бив по bank.gov.ua на кожен перший запит.
+  await query(`
+    create table if not exists exchange_rates (
+      currency    text primary key,
+      rate_uah    numeric not null,
+      updated_at  timestamptz not null default now()
+    );
+  `);
+
   ensured = true;
 }

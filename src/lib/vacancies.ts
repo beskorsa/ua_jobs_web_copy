@@ -2,6 +2,28 @@ import { randomUUID } from "crypto";
 import { query } from "./db";
 import { vecToPg } from "./vector";
 import { fetchVacancyPage } from "./fetchExternalVacancy";
+import { toUsdSalary } from "./currency";
+
+// Усі зарплати, які повертає ця модель, показуються в USD (конвертація за
+// живим курсом НБУ, див. currency.ts) — незалежно від того, у якій валюті
+// вакансію завантажив парсер чи вказав роботодавець. Оригінальна валюта не
+// зберігається окремо в результаті: salary_currency після конвертації
+// завжди "USD" (або null/оригінал, якщо конвертувати не вдалось — див.
+// toUsdSalary). Застосовується в ЄДИНОМУ місці — тут, — щоб UI
+// (VacancyCard.tsx) не треба було міняти: він просто показує
+// salary_min–salary_max salary_currency як і раніше.
+async function withUsdSalary<
+  T extends { salary_min: number | null; salary_max: number | null; salary_currency: string | null },
+>(row: T): Promise<T> {
+  const converted = await toUsdSalary(row.salary_min, row.salary_max, row.salary_currency);
+  return { ...row, salary_min: converted.min, salary_max: converted.max, salary_currency: converted.currency };
+}
+
+async function withUsdSalaryMany<
+  T extends { salary_min: number | null; salary_max: number | null; salary_currency: string | null },
+>(rows: T[]): Promise<T[]> {
+  return Promise.all(rows.map(withUsdSalary));
+}
 
 export type WorkMode = "remote" | "office" | "hybrid";
 
@@ -212,7 +234,7 @@ export async function semanticSearch(
     order by distance asc
     limit $2
   `;
-  return query<VacancyResult>(sql, params);
+  return withUsdSalaryMany(await query<VacancyResult>(sql, params));
 }
 
 // pgvector `order by distance limit topK` ЗАВЖДИ повертає topK найближчих
@@ -264,7 +286,7 @@ export async function getVacancy(id: number): Promise<Vacancy | null> {
      from vacancies where id = $1`,
     [id],
   );
-  return rows[0] ?? null;
+  return rows[0] ? await withUsdSalary(rows[0]) : null;
 }
 
 // Якщо посилання веде на вакансію, яку вже затягнув парсер (work.ua/
@@ -284,7 +306,7 @@ export async function getVacancyByUrl(rawUrl: string): Promise<Vacancy | null> {
      limit 1`,
     [rawUrl],
   );
-  return rows[0] ?? null;
+  return rows[0] ? await withUsdSalary(rows[0]) : null;
 }
 
 // Пользователь прислал в чат прямую ссылку на вакансию (необязательно с
@@ -313,7 +335,7 @@ export async function storeExternalVacancy(page: Awaited<ReturnType<typeof fetch
                salary_min, salary_max, salary_currency, work_mode`,
     [page.title.slice(0, 300), page.text, page.finalUrl, workMode],
   );
-  return rows[0];
+  return withUsdSalary(rows[0]);
 }
 
 // Зручна обгортка fetch+store для місць, де перевірка "це точно вакансія?"
@@ -338,5 +360,5 @@ export async function upsertVacancyFromText(title: string, text: string): Promis
                salary_min, salary_max, salary_currency, work_mode`,
     [title.slice(0, 300), text.slice(0, 12000), syntheticUrl, workMode],
   );
-  return rows[0];
+  return withUsdSalary(rows[0]);
 }

@@ -156,6 +156,30 @@ const DB_SCOPE_NOTICE =
 
 type ShownVacancy = { id: number; title: string };
 
+// Історія чату для фронта (не для LLM-контексту — той підвантажується
+// окремо всередині POST). Раніше messages в page.tsx був чистим React-
+// стейтом і завжди починався з порожнього масиву — при перезавантаженні
+// сторінки чат "забував" усе, хоча самі повідомлення весь час писались у
+// chat_messages. Віддаємо тільки role+content: карточки вакансій/cover
+// letter/поради, які прикріплялись до повідомлення на фронті, у базі не
+// зберігаються — при відновленні історії показуються лише текстові репліки.
+const CHAT_HISTORY_LIMIT = 30;
+
+export async function GET() {
+  try {
+    await ensureSchema();
+    const userId = await getOrCreateUserId();
+    const rows = await query<{ role: string; content: string }>(
+      `select role, content from chat_messages where user_id = $1 order by created_at asc limit $2`,
+      [userId, CHAT_HISTORY_LIMIT],
+    );
+    return NextResponse.json({ messages: rows });
+  } catch (e: any) {
+    console.error("[api/chat GET]", e);
+    return NextResponse.json({ error: e.message ?? String(e) }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     await ensureSchema();
